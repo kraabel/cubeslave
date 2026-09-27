@@ -1,0 +1,21 @@
+{
+  "name": "motion-studio",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "lib": "lib"
+  },
+  "scripts": {
+    "render": "node render.mjs",
+    "sfx": "node sfx.mjs cues.json out/sfx.wav"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "playwright": "^1.63.0"
+  },
+  "type": "module"
+}

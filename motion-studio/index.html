@@ -1,0 +1,53 @@
+<!doctype html>
+<meta charset="utf-8">
+<!-- Route A from the article: one canvas, window.seek(t) paints any moment on demand. -->
+<style>html,body{margin:0;background:#141413}canvas{display:block;max-height:100vh;margin:auto}</style>
+<canvas id="c" width="1080" height="1920"></canvas>
+<script src="lib/motion.js"></script>
+<script>
+const W = 1080, H = 1920, DUR = 15;
+const g = document.getElementById('c').getContext('2d');
+const { clamp, spring, track, rng } = Motion;
+
+const SCENES = [
+  { from: 0, to: 3, draw(t) {                        // kinetic title
+      const s = spring(t - 0.1, 220, 22);
+      g.save(); g.translate(W / 2, H / 2); g.scale(0.6 + 0.4 * s, 0.6 + 0.4 * s);
+      g.globalAlpha = clamp(t * 4);
+      g.fillStyle = '#F0EEE6'; g.font = '700 190px Georgia, serif';
+      g.textAlign = 'center'; g.fillText('MOTION', 0, 0);
+      g.fillStyle = '#D97757'; g.fillRect(-320 * s, 50, 640 * s, 18);
+      g.restore();
+  }},
+  { from: 3, to: 6, draw(t) {                        // grid of squares on a stagger
+      const r = rng(7);
+      for (let i = 0; i < 48; i++) {
+        const x = (i % 6) * 170 + 115, y = Math.floor(i / 6) * 170 + 360;
+        const s = spring(t - i * 0.03 - r() * 0.1, 260, 20);
+        g.fillStyle = i % 7 ? '#F0EEE6' : '#D97757';
+        g.fillRect(x - 60 * s, y - 60 * s, 120 * s, 120 * s);
+      }
+  }},
+  { from: 6, to: 9, draw(t) {                        // one shape morphing through targets (track())
+      const keys = (a, b, c) => [[0, a], [0.8, b], [1.8, c]];
+      const w = track(t, keys(160, 760, 300)), h = track(t, keys(160, 140, 300));
+      const r = track(t, keys(80, 70, 24));
+      g.fillStyle = '#D97757';
+      g.beginPath(); g.roundRect(W / 2 - w / 2, H / 2 - h / 2, w, h, r); g.fill();
+  }},
+  // ... more scenes: Opus appends here, one object per shot
+];
+
+function draw(t) {
+  g.fillStyle = '#141413'; g.fillRect(0, 0, W, H);
+  for (const s of SCENES) if (t >= s.from && t < s.to) s.draw(t - s.from);
+}
+window.DUR = DUR;
+window.seek = (t) => { draw(t); return true; };
+
+// Live preview in a normal browser, off during headless render
+if (!navigator.webdriver) {
+  const t0 = performance.now();
+  (function loop() { draw(((performance.now() - t0) / 1000) % DUR); requestAnimationFrame(loop); })();
+}
+</script>

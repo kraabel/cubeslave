@@ -1,0 +1,10 @@
+[
+  {"t": 0.1, "type": "thump"},
+  {"t": 2.9, "type": "whoosh"},
+  {"t": 3.0, "type": "pop"},
+  {"t": 3.5, "type": "click"},
+  {"t": 5.9, "type": "whoosh"},
+  {"t": 6.0, "type": "thump"},
+  {"t": 6.8, "type": "click"},
+  {"t": 7.8, "type": "click"}
+]
