@@ -1,0 +1,430 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Showreel</title>
+<!-- 15s showreel, 1920x1080, 120 BPM (beat = 0.5s, bar = 2s). Pure function of time: window.seek(t). -->
+<style>
+@font-face{font-family:'Inter Tight';font-style:normal;font-weight:800;src:url(fonts/InterTight-800.woff2) format('woff2');font-display:block}
+@font-face{font-family:'Inter Tight';font-style:italic;font-weight:300;src:url(fonts/InterTight-300i.woff2) format('woff2');font-display:block}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:500;src:url(fonts/JetBrainsMono-500.woff2) format('woff2');font-display:block}
+html,body{margin:0;background:#111110}canvas{display:block;max-width:100vw;max-height:100vh;margin:auto}
+</style>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script src="../lib/motion.js"></script>
+<script>
+const W = 1920, H = 1080, DUR = 15;
+const g = document.getElementById('c').getContext('2d');
+const { clamp, spring, track, rng } = Motion;
+
+const BG = '#111110', INK = '#F0EEE6', ACC = '#E8703A', CARD = '#1B1B19';
+const RGB = { bg: [17, 17, 16], ink: [240, 238, 230], acc: [232, 112, 58] };
+const mix = (a, b, m) => `rgb(${a.map((v, i) => Math.round(v + (b[i] - v) * m)).join(',')})`;
+const lerp = (a, b, m) => a + (b - a) * m;
+const S = (t, k = 170, d = 26) => spring(t, k, d);
+const DISPLAY = (px) => `800 ${px}px "Inter Tight"`;
+const ITALIC = (px) => `italic 300 ${px}px "Inter Tight"`;
+const MONO = (px) => `500 ${px}px "JetBrains Mono"`;
+
+window.ready = Promise.all([
+  document.fonts.load(DISPLAY(100)), document.fonts.load(ITALIC(100)), document.fonts.load(MONO(20)),
+]);
+
+// ---------- shared drawing helpers ----------
+
+// Word rising letter by letter out of a mask. dir = -1 exits upward, +1 drops back down.
+function maskedWord(t, text, x, base, px, tIn, tOut, { stagger = 0.035, exitDir = -1, accentLast = false, color = INK, track: trk = -0.02 } = {}) {
+  g.save();
+  g.font = DISPLAY(px);
+  g.beginPath(); g.rect(0, base - px * 0.92, W, px * 1.12); g.clip();
+  let cx = x;
+  const n = text.length;
+  for (let i = 0; i < n; i++) {
+    const ch = text[i];
+    const inP = S(t - tIn - i * stagger, 260, 28);
+    const outP = tOut == null ? 0 : S(t - tOut - i * stagger * 0.6, 300, 30);
+    const y = base + (1 - inP) * px * 1.05 + outP * px * 1.45 * exitDir;
+    g.fillStyle = accentLast && i === n - 1 ? ACC : color;
+    g.fillText(ch, cx, y);
+    cx += g.measureText(ch).width + px * trk;
+  }
+  g.restore();
+  return cx; // x after the last glyph
+}
+
+function wordWidth(text, px, trk = -0.02) {
+  g.font = DISPLAY(px);
+  let w = 0; for (const ch of text) w += g.measureText(ch).width + px * trk;
+  return w;
+}
+
+// Typewriter: characters appear at a fixed rate, and delete faster on the way out.
+function typed(t, text, x, y, px, tIn, tOut, { color = INK, alpha = 0.62, align = 'left', cps = 70 } = {}) {
+  let n = Math.floor(clamp((t - tIn) * cps, 0, text.length));
+  if (tOut != null && t > tOut) n = Math.max(0, n - Math.floor((t - tOut) * cps * 3));
+  if (n <= 0) return;
+  g.save(); g.font = MONO(px); g.textAlign = align; g.globalAlpha = alpha; g.fillStyle = color;
+  const s = text.slice(0, n);
+  g.fillText(s, x, y);
+  const caret = (tOut == null || t < tOut) && n < text.length;
+  if (caret) { const w = g.measureText(s).width; g.globalAlpha = 1; g.fillStyle = ACC; g.fillRect(align === 'center' ? x + w / 2 + 4 : x + w + 4, y - px * 0.8, px * 0.55, px * 0.95); }
+  g.restore();
+}
+
+function cursor(x, y, scale = 1) {
+  if (scale <= 0.001) return;
+  g.save(); g.translate(x, y); g.scale(scale, scale);
+  g.beginPath(); g.moveTo(0, 0); g.lineTo(0, 38); g.lineTo(10, 29); g.lineTo(17, 45); g.lineTo(24, 42); g.lineTo(17, 26); g.lineTo(30, 26); g.closePath();
+  g.fillStyle = INK; g.fill(); g.lineWidth = 3; g.strokeStyle = BG; g.stroke();
+  g.restore();
+}
+
+function clickRing(t, t0, x, y, color = INK) {
+  const p = t - t0; if (p < 0 || p > 0.45) return;
+  g.save(); g.strokeStyle = color; g.globalAlpha = 1 - p / 0.45; g.lineWidth = 3;
+  g.beginPath(); g.arc(x, y, 14 + 70 * S(p, 260, 30), 0, Math.PI * 2); g.stroke(); g.restore();
+}
+
+// ---------- the dot/bar that threads S1 → S2 (and returns in S8) ----------
+// It is one rounded rect: left edge pinned at x=160, right edge / y / height on springs.
+function threadBar(t) {
+  if (t >= 4) return;
+  const left = 160;
+  const right = track(t, [[0, 204], [0.5, 1760], [1.78, 172], [2.0, 560], [2.5, 960], [3.0, 1360], [3.5, 1760]], 210, 26);
+  let y = track(t, [[0, 700], [1.78, 900]], 170, 26);
+  let h = track(t, [[0, 44], [0.5, 14], [1.78, 8]], 200, 26);
+  let sx = 1, sy = 1;
+  if (t < 0.35) { const f = (t / 0.35) ** 2; y = lerp(-90, 700, f); sy = 1 + 0.45 * f; sx = 1 - 0.2 * f; }
+  else if (t < 0.5) { const p = t - 0.35, q = Math.exp(-p * 16) * Math.cos(p * 38) * 0.45; sx = 1 + q; sy = 1 - q; }
+  const w = Math.max(h, right - left);
+  if (t > 0.35 && t < 0.9) {
+    const p = t - 0.35; g.save(); g.strokeStyle = ACC; g.lineWidth = 3; g.globalAlpha = 1 - p / 0.55;
+    g.beginPath(); g.ellipse(182, 722, 30 + 220 * S(p, 200, 28), 8 + 40 * S(p, 200, 28), 0, 0, Math.PI * 2); g.stroke(); g.restore();
+  }
+  g.save(); g.translate(left + w / 2, y); g.scale(sx, sy);
+  g.fillStyle = ACC; g.beginPath(); g.roundRect(-w / 2, -h / 2, w, h, h / 2); g.fill();
+  g.restore();
+  return { right, y };
+}
+
+// ---------- scenes ----------
+
+function s1(t) { // 0–2: hook
+  maskedWord(t, 'MOTION', 152, 650, 330, 0.6, 1.7, { stagger: 0.045, exitDir: 1 });
+  typed(t, 'showreel.js  —  15 seconds, one function of time', 164, 780, 28, 0.85, 1.72);
+  typed(t, `t = ${t.toFixed(3)}s`, 1760, 780, 28, 0.85, 1.72, { align: 'right', alpha: 0.4, cps: 200 });
+}
+
+const WORDS = ['TIMING', 'SPACING', 'WEIGHT', 'RHYTHM'];
+function s2(t) { // 2–4: kinetic type on the beat, ruler + playhead below
+  let periodX = 0;
+  WORDS.forEach((w, i) => {
+    const tIn = 2.0 + i * 0.5, tOut = i < 3 ? tIn + 0.47 : null;
+    if (t < tIn - 0.05 || (tOut && t > tOut + 0.4)) return;
+    const x = maskedWord(t, w + '.', 152, 650, 300, tIn, tOut, { stagger: 0.022, accentLast: true });
+    if (i === 3) periodX = x;
+  });
+  // ruler ticks
+  g.save(); g.fillStyle = INK;
+  for (let i = 0; i <= 32; i++) {
+    const s = S(t - 1.85 - i * 0.012, 260, 26), x = 160 + i * 50, big = i % 8 === 0;
+    g.globalAlpha = big ? 0.8 : 0.35;
+    const h = (big ? 34 : 16) * s;
+    g.fillRect(x - 1, 900 - 10 - h, 2, h);
+  }
+  // beat labels under the ruler
+  g.font = MONO(22);
+  WORDS.forEach((w, i) => {
+    const x = 560 + i * 400, on = t >= 2 + i * 0.5, s = S(t - 1.9 - i * 0.05, 220, 26);
+    g.globalAlpha = clamp(s) * (on ? 1 : 0.35); g.fillStyle = on && t < 2.5 + i * 0.5 ? ACC : INK;
+    g.textAlign = 'right'; g.fillText(w.toLowerCase(), x, 950 + (1 - s) * 20);
+  });
+  g.restore();
+  // playhead on the bar's right edge
+  const bar = threadBarPos(t);
+  g.save(); g.fillStyle = ACC; g.globalAlpha = clamp((t - 1.85) * 6);
+  g.fillRect(bar.right - 2, 840, 4, 70);
+  g.beginPath(); g.moveTo(bar.right - 12, 830); g.lineTo(bar.right + 12, 830); g.lineTo(bar.right, 846); g.fill();
+  g.restore();
+  return periodX;
+}
+function threadBarPos(t) {
+  return { right: track(t, [[0, 204], [0.5, 1760], [1.78, 172], [2.0, 560], [2.5, 960], [3.0, 1360], [3.5, 1760]], 210, 26) };
+}
+
+// shape keys shared by the shape and its echoes
+const SH = {
+  w: [[3.9, 0], [4.0, 260], [4.5, 760], [5.0, 380], [5.5, 170], [5.85, 44]],
+  h: [[3.9, 0], [4.0, 260], [4.5, 190], [5.0, 380], [5.5, 620], [5.85, 44]],
+  r: [[3.9, 0], [4.0, 130], [4.5, 95], [5.0, 44], [5.5, 85], [5.85, 22]],
+  a: [[3.9, 0], [4.5, 0], [5.0, Math.PI / 4], [5.5, Math.PI], [5.85, Math.PI]],
+};
+function shapeAt(t) {
+  const k = 230, d = 19; // playful: visible overshoot
+  const w = Math.max(0, track(t, SH.w, k, d)), h = Math.max(0, track(t, SH.h, k, d));
+  const r = clamp(track(t, SH.r, k, d), 0, Math.min(w, h) / 2), a = track(t, SH.a, 170, 22);
+  return { w, h, r, a };
+}
+function drawShape(s, alpha) {
+  g.save(); g.globalAlpha = alpha; g.translate(960, 520); g.rotate(s.a);
+  g.fillStyle = BG; g.beginPath(); g.roundRect(-s.w / 2, -s.h / 2, s.w, s.h, s.r); g.fill(); g.restore();
+}
+function s3(t) { // 4–6: one shape morphing on every beat, on the accent
+  g.fillStyle = ACC; g.fillRect(-50, -50, W + 100, H + 100);
+  for (let j = 6; j >= 1; j--) drawShape(shapeAt(t - j * 0.028), 0.07 * (7 - j));
+  const s = shapeAt(t);
+  drawShape(s, 1);
+  g.save(); g.font = MONO(26); g.fillStyle = BG; g.textAlign = 'center'; g.globalAlpha = clamp((t - 4.05) * 6) * 0.8;
+  const deg = ((s.a * 180 / Math.PI) % 360 + 360) % 360;
+  g.fillText(`w ${String(s.w | 0).padStart(3, '0')}   h ${String(s.h | 0).padStart(3, '0')}   r ${String(s.r | 0).padStart(3, '0')}   θ ${String(deg | 0).padStart(3, '0')}°`, 960, 960);
+  g.restore();
+}
+
+// Grid: 32 x 18 = 576 dots. The same 576 points become the sphere, the torus and the card border.
+const COLS = 32, ROWS = 18, N = COLS * ROWS;
+const GRID = Array.from({ length: N }, (_, i) => [30 + (i % COLS) * 60, 30 + Math.floor(i / COLS) * 60]);
+const CLICKS = [{ t: 6.5, x: 620, y: 380, c: INK }, { t: 7.0, x: 1300, y: 660, c: ACC }];
+function ripple(t, x, y) { // returns [amp, orangeAmp]
+  let a = 0, o = 0;
+  for (const c of CLICKS) {
+    const d = Math.hypot(x - c.x, y - c.y), p = t - c.t - d / 1300;
+    if (p <= 0) continue;
+    const v = Math.sin(p * 16) * Math.exp(-p * 3.2) * Math.exp(-d / 1100);
+    a += v; if (c.c === ACC) o = Math.max(o, v);
+  }
+  return [a, o];
+}
+
+// 3D: sphere and torus positions for each of the 576 indices
+const SPH = Array.from({ length: N }, (_, i) => {
+  const y = 1 - (i + 0.5) / N * 2, r = Math.sqrt(1 - y * y), th = i * Math.PI * (3 - Math.sqrt(5));
+  return [Math.cos(th) * r * 330, y * 330, Math.sin(th) * r * 330];
+});
+const TOR = Array.from({ length: N }, (_, i) => {
+  const u = (i % COLS) / COLS * Math.PI * 2, v = Math.floor(i / COLS) / ROWS * Math.PI * 2, R = 300, r = 118;
+  return [(R + r * Math.cos(v)) * Math.cos(u), r * Math.sin(v), (R + r * Math.cos(v)) * Math.sin(u)];
+});
+const CARD_R = { x: 580, y: 300, w: 760, h: 480, r: 28 };
+const UI_SCALE = 1.3, UI_CY = 540;
+const uiXY = (x, y) => [960 + (x - 960) * UI_SCALE, UI_CY + (y - UI_CY) * UI_SCALE];
+const PERIM = Array.from({ length: N }, (_, i) => {
+  const { x, y, w, h } = CARD_R, p = (i / N) * 2 * (w + h);
+  if (p < w) return uiXY(x + p, y);
+  if (p < w + h) return uiXY(x + w, y + p - w);
+  if (p < 2 * w + h) return uiXY(x + w - (p - w - h), y + h);
+  return uiXY(x, y + h - (p - 2 * w - h));
+});
+function project(p, t) {
+  const ay = (t - 7.5) * 0.9 + 0.6 * S(t - 8.75, 90, 20), ax = 0.42 + 0.5 * S(t - 8.75, 90, 20);
+  let [x, y, z] = p;
+  [x, z] = [x * Math.cos(ay) - z * Math.sin(ay), x * Math.sin(ay) + z * Math.cos(ay)];
+  [y, z] = [y * Math.cos(ax) - z * Math.sin(ax), y * Math.sin(ax) + z * Math.cos(ax)];
+  const f = 1500 / (1500 + z);
+  return [960 + x * f, 520 + y * f, f, z];
+}
+
+function s4to5(t) { // 6–10: grid ripple → sphere → torus → card border
+  const mSph = S(t - 7.45, 110, 21), mTor = S(t - 8.75, 120, 20), mCard = S(t - 9.45, 150, 24);
+  const pts = [];
+  for (let i = 0; i < N; i++) {
+    let [x, y] = GRID[i];
+    const pop = S(t - 6.0 - Math.hypot(x - 960, y - 520) / 2600, 300, 24);
+    const [a, o] = ripple(t, x, y);
+    const ang = Math.atan2(y - CLICKS[0].y, x - CLICKS[0].x);
+    let rad = (4 + 7 * Math.max(0, a)) * pop, orange = o > 0.18;
+    x += Math.cos(ang) * 10 * a; y += Math.sin(ang) * 10 * a;
+    if (mSph > 0.0001) {
+      const p3 = SPH[i].map((v, k) => lerp(v, TOR[i][k], mTor));
+      const [px, py, f, z] = project(p3, t);
+      x = lerp(x, px, mSph); y = lerp(y, py, mSph);
+      rad = lerp(rad, 4.2 * f * f, mSph);
+      orange = mSph > 0.5 ? i % 11 === 0 : orange;
+      pts.push({ x, y, rad, orange, z });
+    } else pts.push({ x, y, rad, orange, z: 0 });
+    if (mCard > 0.0001) {
+      const q = pts[pts.length - 1];
+      q.x = lerp(q.x, PERIM[i][0], mCard); q.y = lerp(q.y, PERIM[i][1], mCard); q.rad = lerp(q.rad, 2.2, mCard);
+    }
+  }
+  if (mSph > 0.3) pts.sort((a, b) => b.z - a.z);
+  const fade = 1 - clamp((t - 9.85) / 0.2);
+  g.save(); g.globalAlpha = fade;
+  for (const p of pts) {
+    const depth = mSph > 0.3 ? clamp(0.35 + (330 - p.z) / 700, 0.25, 1) : 1;
+    g.globalAlpha = fade * lerp(1, depth, mSph);
+    g.fillStyle = p.orange ? ACC : INK;
+    g.beginPath(); g.arc(p.x, p.y, Math.max(0, p.rad), 0, Math.PI * 2); g.fill();
+  }
+  g.restore();
+  // cursor + clicks in the grid
+  if (t < 7.6) {
+    const cx = track(t, [[5.9, 1700], [6.08, 1500], [6.42, 620], [6.72, 760], [6.92, 1300], [7.25, 1560]], 200, 26);
+    const cy = track(t, [[5.9, 900], [6.08, 820], [6.42, 380], [6.72, 520], [6.92, 660], [7.25, 900]], 200, 26);
+    const press = 1 - 0.16 * (Math.exp(-Math.abs(t - 6.5) * 18) + Math.exp(-Math.abs(t - 7.0) * 18));
+    CLICKS.forEach((c) => clickRing(t, c.t, c.x, c.y, c.c));
+    cursor(cx, cy, S(t - 6.08, 300, 26) * (1 - S(t - 7.25, 300, 26)) * press);
+  }
+  typed(t, '576 points  ·  sphere → torus  ·  no 3D engine', 960, 990, 26, 7.95, 9.4, { align: 'center', alpha: 0.55 });
+}
+
+// UI card: toggle, slider, counter, bar chart. Cursor drives the changes.
+const BARS = (() => { const r = rng(11); return Array.from({ length: 12 }, (_, i) => i === 10 ? 150 : 40 + r() * 95); })();
+const TOGGLE = { x: 1216, y: 408, w: 84, h: 44 };
+function uiState(t) {
+  const on = S(t - 10.5, 320, 28);
+  const thumb = lerp(0.3, 1.0, S(t - 10.78, 110, 22));
+  return { on, thumb };
+}
+function s6(t) { // 10–12
+  g.save(); g.translate(960, UI_CY); g.scale(UI_SCALE, UI_SCALE); g.translate(-960, -UI_CY);
+  s6body(t);
+  g.restore();
+}
+function s6body(t) {
+  const { x, y, w, h, r } = CARD_R;
+  const border = clamp((t - 9.8) / 0.2);
+  const fill = clamp(S(t - 10.0, 200, 26));
+  g.save();
+  g.globalAlpha = fill; g.fillStyle = CARD; g.beginPath(); g.roundRect(x, y, w, h, r); g.fill();
+  g.globalAlpha = border * 0.35; g.strokeStyle = INK; g.lineWidth = 2; g.beginPath(); g.roundRect(x, y, w, h, r); g.stroke();
+  g.restore();
+  const item = (i) => clamp(S(t - 10.05 - i * 0.06, 240, 26)); // alpha > 1 is ignored by canvas, so clamp
+  const { on, thumb } = uiState(t);
+  g.save();
+  // header
+  g.globalAlpha = item(0) * 0.5; g.fillStyle = INK; g.font = MONO(22); g.fillText('render settings', x + 44, y + 62 + (1 - item(0)) * 16);
+  g.globalAlpha = item(0) * 0.35; g.textAlign = 'right'; g.fillText('seek(t)', x + w - 44, y + 62 + (1 - item(0)) * 16); g.textAlign = 'left';
+  // row 1: toggle
+  g.globalAlpha = item(1); g.font = MONO(28); g.fillStyle = INK; g.fillText('motion blur', x + 44, 440 + (1 - item(1)) * 16);
+  g.fillStyle = mix([58, 58, 54], RGB.acc, on); g.beginPath(); g.roundRect(TOGGLE.x, TOGGLE.y, TOGGLE.w, TOGGLE.h, 22); g.fill();
+  g.fillStyle = INK; g.beginPath(); g.arc(TOGGLE.x + 22 + 40 * on, TOGGLE.y + 22, 17 + 3 * Math.sin(Math.PI * clamp(on)), 0, Math.PI * 2); g.fill();
+  // row 2: frame-rate slider + counter
+  g.globalAlpha = item(2); g.fillStyle = INK; g.fillText('frame rate', x + 44, 530 + (1 - item(2)) * 16);
+  g.textAlign = 'right'; g.fillText(`${Math.round(lerp(24, 60, (thumb - 0.3) / 0.7))} fps`, x + w - 44, 530 + (1 - item(2)) * 16); g.textAlign = 'left';
+  const sx0 = x + 44, sx1 = x + w - 44, sy = 570, tx = lerp(sx0, sx1, thumb);
+  g.fillStyle = '#3A3A36'; g.fillRect(sx0, sy - 3, sx1 - sx0, 6);
+  g.fillStyle = ACC; g.fillRect(sx0, sy - 3, tx - sx0, 6);
+  g.fillStyle = INK; g.beginPath(); g.arc(tx, sy, 13, 0, Math.PI * 2); g.fill();
+  // row 3: bars
+  g.globalAlpha = item(3);
+  BARS.forEach((bh, i) => {
+    const s = S(t - 11.0 - i * 0.035, 230, 17);
+    g.fillStyle = i === 10 ? ACC : 'rgba(240,238,230,0.85)';
+    const hh = bh * s; g.fillRect(x + 44 + i * 58, 745 - hh, 40, hh);
+  });
+  g.restore();
+  // cursor path: toggle → slider thumb → drag → away
+  const cx = track(t, [[9.95, 1500], [10.1, 1420], [10.26, TOGGLE.x + 62], [10.6, lerp(sx0, sx1, 0.3)], [11.25, 1560]], 220, 26);
+  const cy = track(t, [[9.95, 900], [10.1, 860], [10.26, TOGGLE.y + 22], [10.6, sy], [11.25, 880]], 220, 26);
+  // while dragging, the cursor rides the thumb
+  const drag = t >= 10.78 && t < 11.25;
+  const px = drag ? tx : cx, py = drag ? sy : cy;
+  clickRing(t, 10.5, TOGGLE.x + 62, TOGGLE.y + 22);
+  clickRing(t, 10.78, lerp(sx0, sx1, 0.3), sy);
+  const press = 1 - 0.16 * Math.exp(-Math.abs(t - 10.5) * 18) - (drag ? 0.12 : 0);
+  cursor(px, py, S(t - 10.08, 300, 26) * (1 - S(t - 11.45, 300, 26)) * press);
+}
+
+// Lissajous snake that straightens into the S1 underline
+function lis(u) { return [960 + 720 * Math.sin(3 * u + Math.PI / 2), 520 + 330 * Math.sin(2 * u)]; }
+function s7line(t) { // 12–13.5, then held as the underline through 14.6
+  const head = Math.PI * 2 * 1.02 * S(t - 12.02, 26, 10.5);
+  const tail = Math.max(0, head - 3.1);
+  const m = S(t - 13.0, 150, 22);
+  const pulse = [12.0, 12.5, 13.0].reduce((a, b) => a + (t > b ? Math.exp(-(t - b) * 10) : 0), 0);
+  const width = lerp(12 + 8 * pulse, 14, m);
+  // end-state line (S8) retracts to the dot at 14.55
+  const retract = S(t - 14.55, 260, 26);
+  const n = 220, pts = [];
+  for (let i = 0; i <= n; i++) {
+    const u = lerp(tail, head, i / n), [lx, ly] = lis(u);
+    const sx = lerp(160, 1760, i / n), fx = lerp(sx, 160 + 22 + (sx - 160) * 0.0275, retract);
+    pts.push([lerp(lx, fx, m), lerp(ly, 700, m)]);
+  }
+  g.save(); g.lineCap = 'round'; g.lineJoin = 'round'; g.lineWidth = lerp(width, 44, retract);
+  g.strokeStyle = mix(RGB.ink, RGB.acc, m);
+  g.beginPath(); pts.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y))); g.stroke();
+  if (m < 0.98) { const [hx, hy] = pts[n]; g.globalAlpha = 1 - m; g.fillStyle = ACC; g.beginPath(); g.arc(hx, hy, 17, 0, Math.PI * 2); g.fill(); }
+  g.restore();
+}
+function s8(t) { // 13.5–15: end card, then the dot shoots back up (loops into frame 0)
+  const hold = t < 14.8;
+  if (hold) s7line(t);
+  maskedWord(t, 'made in code.', 152, 650, 236, 13.52, 14.52, { stagger: 0.028, exitDir: 1, accentLast: true, track: -0.03 });
+  typed(t, '0 keyframes  ·  0 after effects  ·  1 function of time', 164, 780, 28, 13.85, 14.5);
+  if (!hold) { // dot leaves: reverse of the intro fall
+    const p = (t - 14.8) / 0.2, y = lerp(700, -90, p * p);
+    g.save(); g.translate(182, y); g.scale(1 - 0.2 * p, 1 + 0.45 * p); g.fillStyle = ACC;
+    g.beginPath(); g.arc(0, 0, 22, 0, Math.PI * 2); g.fill(); g.restore();
+  }
+}
+
+// ---------- transitions + camera ----------
+function camera(t) {
+  // punch on every bar downbeat, and a slow drift inside each bar
+  let s = 1;
+  for (const b of [2, 4, 6, 8, 10, 13.5]) if (t >= b) s += 0.022 * Math.exp(-(t - b) * 7);
+  s += 0.012 * ((t % 2) / 2);
+  g.translate(W / 2, H / 2); g.scale(s, s); g.translate(-W / 2, -H / 2);
+}
+
+function draw(t) {
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.fillStyle = BG; g.fillRect(0, 0, W, H);
+  g.save(); camera(t);
+
+  if (t < 4) {
+    threadBar(t);
+    if (t < 2) s1(t);
+    let px = 0;
+    if (t >= 1.8) px = s2(t);
+    // circle wipe out of the last period
+    if (t >= 3.7) {
+      const r = 2400 * S(t - 3.72, 120, 22);
+      g.fillStyle = ACC; g.beginPath(); g.arc(px - 40, 620, r, 0, Math.PI * 2); g.fill();
+    }
+  } else if (t < 6.1) {
+    // orange field collapses back into a dot at the shape's centre
+    if (t < 5.75) s3(t);
+    else {
+      const r = 22 + 2400 * (1 - S(t - 5.78, 150, 24));
+      g.save(); g.beginPath(); g.arc(960, 520, r, 0, Math.PI * 2); g.clip(); s3(t); g.restore();
+      const fillDot = clamp((t - 5.95) / 0.1);
+      g.fillStyle = ACC; g.globalAlpha = fillDot; g.beginPath(); g.arc(960, 520, 22 * (1 - S(t - 6.0, 300, 26)), 0, Math.PI * 2); g.fill(); g.globalAlpha = 1;
+    }
+    if (t >= 6.0) s4to5(t);
+  } else if (t < 10) {
+    s4to5(t);
+    if (t >= 9.8) s6(t);
+  } else if (t < 12.05) {
+    // zoom through the toggle knob into the next shot
+    const z = t < 11.55 ? 1 : Math.pow(90, S(t - 11.55, 70, 17));
+    const [kx, ky] = uiXY(TOGGLE.x + 62, TOGGLE.y + 22), m = S(t - 11.55, 70, 17);
+    g.save(); g.translate(lerp(kx, 960, m), lerp(ky, 540, m)); g.scale(z, z); g.translate(-kx, -ky);
+    s6(t); g.restore();
+  }
+  if (t >= 12.0 && t < 13.5) {
+    s7line(t);
+    // iris: accent field with a growing hole
+    const r = 2400 * S(t - 12.02, 110, 22);
+    if (r < 2300) {
+      g.save(); g.fillStyle = ACC; g.beginPath(); g.rect(-100, -100, W + 200, H + 200); g.arc(960, 540, r, 0, Math.PI * 2, true); g.fill(); g.restore();
+    }
+  }
+  if (t >= 13.5) s8(t);
+
+  g.restore();
+  // vignette
+  const v = g.createRadialGradient(960, 540, 420, 960, 540, 1150);
+  v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,0.38)');
+  g.fillStyle = v; g.fillRect(0, 0, W, H);
+}
+
+window.DUR = DUR;
+window.seek = (t) => { draw(t); return true; };
+
+if (!navigator.webdriver) {
+  window.ready.then(() => {
+    const t0 = performance.now();
+    (function loop() { draw(((performance.now() - t0) / 1000) % DUR); requestAnimationFrame(loop); })();
+  });
+}
+</script>

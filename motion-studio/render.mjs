@@ -17,7 +17,7 @@ mkdirSync(dirname(OUT), { recursive: true });
 const browser = await chromium.launch(process.env.CHROMIUM ? { executablePath: process.env.CHROMIUM } : {});
 const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
 await page.goto('file://' + PAGE);
-await page.evaluate(() => document.fonts.ready);       // canvas text needs loaded fonts
+await page.evaluate(() => window.ready || document.fonts.ready); // canvas text needs loaded fonts
 
 // tmix averages SUB consecutive subframes (motion blur); select keeps one per group
 const vf = SUB > 1
