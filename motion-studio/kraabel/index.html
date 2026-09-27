@@ -1,0 +1,330 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Kraabel.ai Ad</title>
+<!-- 15s ad for kraabel.ai, 1920x1080, 96 BPM (beat = 0.625s, bar = 2.5s). Pure function of time: window.seek(t).
+     Brand: kraabel.ai design standard. Ink, cream, one accent, Inter hairline, rules never boxes. -->
+<link rel="stylesheet" href="inter.css">
+<style>html,body{margin:0;background:#121210}canvas{display:block;max-width:100vw;max-height:100vh;margin:auto}</style>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script src="../lib/motion.js"></script>
+<script>
+const W = 1920, H = 1080, DUR = 15, M = 160, BEAT = 0.625;
+const g = document.getElementById('c').getContext('2d');
+const { clamp, spring, rng } = Motion;
+
+const INK = '#121210', CREAM = '#F1EFE8', TEXT = '#34332E', RULE = '#D1CFC9', RULE_HI = '#A8A49A',
+  MUTED = '#8F8C82', ACC = '#E8650A', INK_RULE = '#35332E', INK_MUTED = '#A8A59C', INK_TEXT = '#A3A19C';
+const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+const mix = (a, b, m) => { const A = hex(a), B = hex(b); return `rgb(${A.map((v, i) => Math.round(v + (B[i] - v) * clamp(m))).join(',')})`; };
+const lerp = (a, b, m) => a + (b - a) * m;
+const S = (t, k = 170, d = 26) => spring(t, k, d);
+const C = (t, k, d) => clamp(S(t, k, d));
+const font = (w, px) => `${w} ${px}px Inter`;
+
+window.ready = Promise.all([200, 400, 500, 600].map((w) => document.fonts.load(font(w, 40))));
+
+// ---------- type helpers ----------
+function setType(w, px, track = 0) { g.font = font(w, px); g.letterSpacing = `${track * px}px`; }
+
+// Words rise out of a mask one by one. The final '.' is the accent. align: 'left' | 'right'.
+function riseLine(t, text, x, base, px, tIn, tOut, { w = 200, color = CREAM, track = -0.028, stagger = 0.06, align = 'left', exitDir = -1, accentDot = true, hideDot = false } = {}) {
+  setType(w, px, track);
+  const words = text.split(' ');
+  const full = g.measureText(text).width;
+  let cx = align === 'right' ? x - full : x;
+  g.save(); g.beginPath(); g.rect(0, base - px * 1.02, W, px * 1.32); g.clip();
+  words.forEach((wd, i) => {
+    const inP = S(t - tIn - i * stagger, 190, 26);
+    const outP = tOut == null ? 0 : S(t - tOut - i * stagger * 0.5, 240, 28);
+    const y = base + (1 - inP) * px * 1.25 + outP * px * 1.4 * exitDir;
+    const last = i === words.length - 1, dot = accentDot && last && wd.endsWith('.');
+    const body = dot ? wd.slice(0, -1) : wd;
+    g.fillStyle = color; g.fillText(body, cx, y);
+    if (dot && !hideDot) { g.fillStyle = ACC; g.fillText('.', cx + g.measureText(body).width, y); }
+    cx += g.measureText(wd + ' ').width;
+  });
+  g.restore();
+  return { x: align === 'right' ? x - full : x, w: full };
+}
+
+// Letterspaced uppercase label; an optional leading numeral takes the accent.
+function label(t, num, text, x, base, px, tIn, tOut, { color = MUTED, align = 'left' } = {}) {
+  const p = C(t - tIn, 220, 26), o = tOut == null ? 0 : C(t - tOut, 260, 28);
+  if (p <= 0 || o >= 1) return;
+  setType(400, px, 0.24);
+  const numW = num ? g.measureText(num + '   ').width : 0, txtW = g.measureText(text).width;
+  let x0 = align === 'right' ? x - numW - txtW : x;
+  g.save(); g.beginPath(); g.rect(0, base - px * 1.3, W, px * 1.7); g.clip();
+  const y = base + (1 - p) * px * 1.6 - o * px * 1.8;
+  if (num) { g.fillStyle = ACC; g.fillText(num, x0, y); }
+  g.fillStyle = color; g.fillText(text, x0 + numW, y);
+  g.restore();
+}
+
+function wrap(text, maxW) {
+  const out = []; let line = '';
+  for (const w of text.split(' ')) { const next = line ? line + ' ' + w : w; if (g.measureText(next).width > maxW && line) { out.push(line); line = w; } else line = next; }
+  if (line) out.push(line); return out;
+}
+
+// Paragraph whose lines rise one after another.
+function riseCopy(t, text, x, top, px, lh, maxW, tIn, { w = 400, color = TEXT, stagger = 0.07 } = {}) {
+  setType(w, px, 0);
+  wrap(text, maxW).forEach((ln, i) => {
+    const p = S(t - tIn - i * stagger, 200, 26), base = top + (i + 1) * lh;
+    g.save(); g.beginPath(); g.rect(0, base - px * 1.1, W, lh); g.clip();
+    g.fillStyle = color; g.fillText(ln, x, base + (1 - p) * lh); g.restore();
+  });
+}
+
+function hline(x0, x1, y, width, color) { if (x1 <= x0) return; g.fillStyle = color; g.fillRect(x0, y - width / 2, x1 - x0, width); }
+
+// ---------- shared header (S2–S5) ----------
+const SECTIONS = [
+  { t: 2.62, num: '01', text: 'THINKING CLEARLY' },
+  { t: 5.12, num: '02', text: 'BUILDING CAREFULLY' },
+  { t: 7.62, num: '03', text: 'ITERATING ALWAYS' },
+];
+function header(t, onCream) {
+  if (t < 2.55 || t > 12.6) return;
+  const out = 12.3;
+  const col = onCream ? INK : CREAM;
+  // wordmark
+  const p = C(t - 2.62, 220, 26), o = C(t - out, 260, 28);
+  setType(500, 20, 0.28);
+  g.save(); g.beginPath(); g.rect(0, 70, W, 50); g.clip();
+  const y = 108 + (1 - p) * 34 - o * 40;
+  g.fillStyle = col; g.fillText('KRAABEL', M, y);
+  const kw = g.measureText('KRAABEL').width;
+  g.fillStyle = ACC; g.fillText('.', M + kw, y);
+  g.fillStyle = col; g.fillText('AI', M + kw + g.measureText('.').width, y);
+  g.restore();
+  SECTIONS.forEach((s, i) => {
+    const next = SECTIONS[i + 1];
+    label(t, s.num, s.text, W - M, 108, 18, s.t, next ? next.t - 0.08 : out, { align: 'right', color: onCream ? MUTED : INK_MUTED });
+  });
+}
+
+// ---------- S1 (0–2.6): a hand line and a machine line meet ----------
+function wobble(x, amp, seed = 0) {
+  return amp * (0.6 * Math.sin(x * 0.019 + 1.3 + seed) + 0.3 * Math.sin(x * 0.047 + seed * 2) + 0.16 * Math.sin(x * 0.113 + 2 + seed));
+}
+function s1Line(t) {
+  // after 2.35 the joined line rises to become the header hairline at y 140
+  const rise = S(t - 2.35, 150, 24), y0 = lerp(600, 140, rise);
+  const amp = 22 * (1 - C(t - 1.95, 90, 20));
+  const handHead = lerp(M, 960, clamp(S(t - 0.02, 12, 7)));
+  const machTail = lerp(W - M, 960, clamp(S(t - 1.0, 16, 8)));
+  const lineCol = mix(CREAM, INK_RULE, rise);
+  // hand-drawn: organic, slightly heavier
+  g.save(); g.strokeStyle = lineCol; g.lineCap = 'round'; g.lineJoin = 'round'; g.lineWidth = lerp(3.4, 1.5, C(t - 1.95, 90, 20));
+  g.beginPath();
+  for (let x = M; x <= handHead; x += 4) { const y = y0 + wobble(x, amp); x === M ? g.moveTo(x, y) : g.lineTo(x, y); }
+  g.stroke(); g.restore();
+  // pencil tip while drawing
+  if (t > 0.02 && t < 1.9) { g.fillStyle = CREAM; g.beginPath(); g.arc(handHead, y0 + wobble(handHead, amp), 3.2, 0, Math.PI * 2); g.fill(); }
+  // machine: a perfect hairline, with a precise square head
+  if (t > 1.0) {
+    hline(machTail, W - M, y0, 1.5, lineCol);
+    if (t < 2.3) { g.fillStyle = ACC; g.fillRect(machTail - 4, y0 - 4, 8, 8); }
+  }
+}
+function s1(t) {
+  riseLine(t, 'Human creativity', M, 500, 150, 0.22, 2.3, { stagger: 0.1 });
+  riseLine(t, 'meets augmented', W - M, 775, 150, 1.25, 2.3, { stagger: 0.08, align: 'right', exitDir: 1 });
+  riseLine(t, 'intelligence.', W - M, 935, 150, 1.45, 2.3, { stagger: 0.08, align: 'right', exitDir: 1 });
+}
+
+// ---------- S2 (2.6–5.1): scattered strokes resolve into ruled lines ----------
+const STROKES = (() => {
+  const r = rng(21), lines = [], out = [];
+  for (let i = 0; i < 9; i++) lines.push({ y: 330 + i * 58, len: i === 8 ? 380 : 700 + r() * 110 });
+  lines.forEach((ln, li) => {
+    let x = 1000; const end = 1000 + ln.len;
+    while (x < end - 30) {
+      const len = Math.min(end - x, 40 + r() * 120);
+      out.push({ tx: x, ty: ln.y, len, sx: 940 + r() * 820, sy: 250 + r() * 640, a: (r() - 0.5) * Math.PI * 1.6, li,
+        d: r() * 0.25, acc: false });
+      x += len + 14;
+    }
+  });
+  out[Math.floor(out.length * 0.37)].acc = true; // one accent mark in the paragraph
+  return out;
+})();
+function s2(t) {
+  riseLine(t, 'Thinking', M, 560, 150, 2.72, 4.85, { stagger: 0 });
+  riseLine(t, 'clearly.', M, 725, 150, 2.8, 4.85, { stagger: 0 });
+  riseCopy(t, 'Structured AI processes free human thinking for what matters most.', M, 780, 34, 50, 720, 3.3, { color: INK_TEXT });
+  const snap = 3.125;
+  STROKES.forEach((s, i) => {
+    const pop = C(t - 2.62 - s.d * 0.6, 260, 22);
+    const m = S(t - snap - s.li * 0.03 - (s.tx - 1000) / 9000, 150, 19);
+    const out = S(t - 4.82 - s.li * 0.02, 240, 28);
+    const x = lerp(s.sx, s.tx, m), y = lerp(s.sy, s.ty, m) - out * 900, a = lerp(s.a, 0, m);
+    g.save(); g.translate(x, y); g.rotate(a); g.globalAlpha = pop;
+    g.fillStyle = s.acc ? ACC : mix(INK_MUTED, CREAM, m);
+    g.fillRect(0, -1.5, s.len * pop, 3); g.restore();
+  });
+}
+
+// ---------- S3 (5.0–7.6): three ruled columns build, one per beat ----------
+const SERVICES = [
+  { n: '01', k: 'STRATEGY', title: 'Brand Strategy', copy: 'Clarifying who you are and why it matters through research-driven positioning.', tag: 'POSITIONING' },
+  { n: '02', k: 'EXPERIENCE', title: 'Digital Experience', copy: 'Creating digital touchpoints that feel human and guide users to action.', tag: 'TOUCHPOINTS' },
+  { n: '03', k: 'INTEGRATION', title: 'AI Integration', copy: 'Building custom tools that extend your team\'s capabilities and free human thinking.', tag: 'CUSTOM TOOLS' },
+];
+function s3(t, dy) {
+  g.save(); g.translate(0, dy);
+  riseLine(t, 'Building carefully.', M, 318, 130, 5.12, null, { color: INK, stagger: 0.07 });
+  riseCopy(t, 'Applied AI for brand and marketing.', M, 350, 34, 48, 1000, 5.35, { color: TEXT });
+  const gap = 56, cw = (W - 2 * M - 2 * gap) / 3, top = 470;
+  SERVICES.forEach((s, i) => {
+    const x = M + i * (cw + gap), t0 = 5.45 + i * BEAT * 0.7;
+    hline(x, x + cw * C(t - t0, 120, 22), top, 2, RULE_HI);
+    label(t, s.n, s.k, x, top + 50, 20, t0 + 0.12, null);
+    riseLine(t, s.title, x, top + 124, 50, t0 + 0.2, null, { w: 600, color: INK, track: -0.01, stagger: 0.04, accentDot: false });
+    riseCopy(t, s.copy, x, top + 150, 30, 44, cw - 6, t0 + 0.3, { color: TEXT, stagger: 0.06 });
+    hline(x, x + cw * C(t - t0 - 0.5, 140, 24), top + 356, 1, RULE);
+    label(t, null, s.tag, x, top + 400, 17, t0 + 0.6, null);
+  });
+  g.restore();
+}
+
+// ---------- S4 (7.5–10.1): sketch, refine, ship. The finished circle becomes the period. ----------
+const CIRC = { x: 1330, y: 560, r: 205 };
+function circlePath(amp, seed, prog) {
+  g.beginPath();
+  const n = 180, end = Math.max(1, Math.floor(n * prog));
+  for (let i = 0; i <= end; i++) {
+    const a = -Math.PI / 2 + (i / n) * Math.PI * 2 * 1.02;
+    const rr = CIRC.r + amp * (0.6 * Math.sin(a * 3 + seed) + 0.4 * Math.sin(a * 7 + seed * 2.3));
+    const x = CIRC.x + Math.cos(a) * rr, y = CIRC.y + Math.sin(a) * rr;
+    i ? g.lineTo(x, y) : g.moveTo(x, y);
+  }
+}
+const VERSIONS = [{ t: 7.9, amp: 26, seed: 1.1 }, { t: 8.52, amp: 10, seed: 2.7 }, { t: 9.15, amp: 0, seed: 0 }];
+function s4(t, dy) {
+  g.save(); g.translate(0, dy);
+  riseLine(t, 'Iterating', M, 470, 150, 7.62, null, { color: INK, stagger: 0 });
+  const al = riseLine(t, 'always.', M, 635, 150, 7.7, null, { color: INK, stagger: 0, hideDot: true });
+  riseCopy(t, 'Nothing is ever finished. The first version is the beginning of the conversation.', M, 690, 34, 50, 760, 8.0, { color: TEXT });
+  // versions: earlier passes stay on the page as lighter strokes
+  const fly = S(t - 9.62, 120, 20);
+  VERSIONS.forEach((v, i) => {
+    const prog = clamp((t - v.t) / 0.5);
+    if (prog <= 0) return;
+    const newest = i === VERSIONS.length - 1 || t < VERSIONS[i + 1].t;
+    g.save(); g.lineCap = 'round'; g.lineJoin = 'round';
+    g.strokeStyle = newest ? INK : RULE_HI; g.lineWidth = newest ? 2.4 : 1.4;
+    if (i === 2) { g.globalAlpha = 1 - clamp(fly * 3); }
+    circlePath(v.amp, v.seed, prog); g.stroke(); g.restore();
+  });
+  // version figure: orange, hairline weight
+  const vi = t < 8.52 ? 0 : t < 9.15 ? 1 : 2;
+  label(t, null, 'VERSION', 1640, 330, 16, 7.85, null);
+  if (t > 7.85) {
+    setType(200, 152, -0.045);
+    VERSIONS.forEach((v, i) => {
+      const inP = S(t - v.t, 220, 24), outP = i < 2 ? S(t - VERSIONS[i + 1].t, 240, 26) : 0;
+      if (inP <= 0.001 || outP >= 0.999) return;
+      g.save(); g.beginPath(); g.rect(1620, 345, 260, 170); g.clip();
+      g.fillStyle = ACC; g.fillText(String(i + 1), 1636, 490 + (1 - inP) * 170 - outP * 280); g.restore();
+    });
+  }
+  // the finished circle shrinks and flies into the period of "always."
+  if (t > 9.15) {
+    setType(200, 150, -0.028);
+    const dotX = al.x + g.measureText('always').width + 22, dotY = 635 - 13;
+    const r = lerp(CIRC.r, 12.5, fly), x = lerp(CIRC.x, dotX, fly), y = lerp(CIRC.y, dotY, fly);
+    if (fly > 0.001) {
+      g.save(); g.fillStyle = mix(CREAM, ACC, clamp(fly * 1.6)); g.strokeStyle = INK; g.lineWidth = 2.4 * (1 - clamp(fly * 2));
+      g.globalAlpha = 1; g.beginPath(); g.arc(x, y, Math.max(0, r), 0, Math.PI * 2);
+      if (fly > 0.3) g.fill(); g.stroke(); g.restore();
+    }
+  }
+  g.restore();
+}
+
+// ---------- S5 (10.0–12.5): the three commitments, stacked ----------
+function s5(t) {
+  ['Thinking clearly.', 'Building carefully.', 'Iterating always.'].forEach((ln, i) =>
+    riseLine(t, ln, M, 410 + i * 185, 164, 10.08 + i * BEAT, 12.28 + i * 0.05, { stagger: 0.05 }));
+}
+
+// ---------- S6 (12.5–15): close ----------
+function s6(t) {
+  // wordmark, set large
+  setType(500, 136, 0.28);
+  const parts = [['K', CREAM], ['R', CREAM], ['A', CREAM], ['A', CREAM], ['B', CREAM], ['E', CREAM], ['L', CREAM], ['.', ACC], ['A', CREAM], ['I', CREAM]];
+  let x = M;
+  g.save(); g.beginPath(); g.rect(0, 300, W, 190); g.clip();
+  parts.forEach(([ch, col], i) => {
+    const p = S(t - 12.55 - i * 0.035, 200, 22);
+    g.fillStyle = col; g.fillText(ch, x, 460 + (1 - p) * 180);
+    x += g.measureText(ch).width;
+  });
+  g.restore();
+  // the 44px cover rule, scaled
+  g.fillStyle = ACC; g.fillRect(M, 530, 132 * C(t - 12.95, 160, 24), 5);
+  riseLine(t, 'Human creativity meets', M, 690, 88, 13.05, null, { stagger: 0.05, accentDot: false });
+  riseLine(t, 'augmented intelligence.', M, 800, 88, 13.2, null, { stagger: 0.05 });
+  riseCopy(t, 'Start a conversation at kraabel.ai', M, 850, 40, 56, 1400, 13.6, { color: INK_MUTED });
+}
+
+// ---------- sheets + transitions ----------
+function draw(t) {
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.letterSpacing = '0px';
+  // camera: a slow, steady push inside each bar, no punches
+  const push = 1 + 0.018 * ((t % 2.5) / 2.5);
+  g.fillStyle = INK; g.fillRect(0, 0, W, H);
+  g.save(); g.translate(W / 2, H / 2); g.scale(push, push); g.translate(-W / 2, -H / 2);
+
+  if (t < 2.62) { s1Line(t); s1(t); }
+  // header hairline, once the joined line has become it
+  if (t >= 2.62 && t < 12.6) {
+    const cream = t >= 5.0 && t < 10.0;
+    const out = C(t - 12.3, 200, 26);
+    hline(M, lerp(W - M, M, out), 140, 1.5, cream ? RULE : INK_RULE);
+  }
+  if (t >= 2.55 && t < 5.2) { s2(t); header(t, false); }
+
+  // cream sheet rises over S2 (5.0), then ink falls back over S4 (10.0)
+  if (t >= 4.8 && t < 10.3) {
+    const top = lerp(H, 0, S(t - 4.85, 150, 24));
+    g.save(); g.beginPath(); g.rect(-60, top, W + 120, H - top + 60); g.clip();
+    g.fillStyle = CREAM; g.fillRect(-60, -60, W + 120, H + 120);
+    hline(M, W - M, 140, 1.5, RULE);
+    // S3 scrolls up and out as S4 scrolls in, like a document
+    const scroll = S(t - 7.38, 150, 24);
+    g.save(); g.beginPath(); g.rect(-60, 150, W + 120, H); g.clip();
+    if (t < 7.9) s3(t, -scroll * 1000);
+    if (t >= 7.3) s4(t, (1 - scroll) * 1000);
+    g.restore();
+    header(t, true);
+    g.restore();
+  }
+  if (t >= 9.88 && t < 10.3) {
+    const down = S(t - 9.88, 150, 24);
+    g.save(); g.beginPath(); g.rect(-60, -60, W + 120, lerp(0, H, down) + 60); g.clip();
+    g.fillStyle = INK; g.fillRect(-60, -60, W + 120, H + 120);
+    hline(M, W - M, 140, 1.5, INK_RULE);
+    header(t, false);
+    if (t >= 10.0) s5(t);
+    g.restore();
+  } else if (t >= 10.3 && t < 12.7) { s5(t); header(t, false); }
+  if (t >= 12.45) s6(t);
+
+  g.restore();
+}
+
+window.DUR = DUR;
+window.seek = (t) => { draw(t); return true; };
+
+if (!navigator.webdriver) {
+  window.ready.then(() => {
+    const t0 = performance.now();
+    (function loop() { draw(((performance.now() - t0) / 1000) % DUR); requestAnimationFrame(loop); })();
+  });
+}
+</script>
