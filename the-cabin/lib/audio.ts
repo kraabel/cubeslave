@@ -14,6 +14,7 @@ type Nodes = {
   windGain: GainNode;
   analyser: AnalyserNode;
   level: Uint8Array<ArrayBuffer>;
+  voiceBus: GainNode;
 };
 
 class CabinAudio {
@@ -115,7 +116,18 @@ class CabinAudio {
     tensionGain.connect(master);
     tensionOsc.start();
 
-    this.n = { ctx, master, verb, droneFilter, tensionOsc, tensionGain, windGain, analyser, level: new Uint8Array(analyser.frequencyBinCount) };
+    // The guide's voice: its own bus so the voice slider and the atmosphere
+    // slider stay independent. It still feeds the analyser, so the waveform
+    // and the paper swarm's light move when the guide speaks.
+    const voiceBus = ctx.createGain();
+    voiceBus.gain.value = this.voiceGain();
+    voiceBus.connect(analyser);
+    const voiceSend = ctx.createGain();
+    voiceSend.gain.value = 0.12;
+    voiceBus.connect(voiceSend);
+    voiceSend.connect(verb);
+
+    this.n = { ctx, master, verb, droneFilter, tensionOsc, tensionGain, windGain, analyser, level: new Uint8Array(analyser.frequencyBinCount), voiceBus };
   }
 
   setAtmosphere(v: number) {
@@ -131,6 +143,7 @@ class CabinAudio {
     this.allMuted = m;
     if (m) hush();
     this.setAtmosphere(this.atmos);
+    this.applyVoiceGain();
   }
 
   isAllMuted() {
@@ -140,6 +153,68 @@ class CabinAudio {
   setVoice(v: number) {
     this.voice = clamp01(v);
     if (this.voice === 0) hush();
+    this.applyVoiceGain();
+  }
+
+  private voiceGain() {
+    return this.allMuted ? 0 : Math.min(1.2, this.voice * this.voice * 1.3);
+  }
+
+  private applyVoiceGain() {
+    if (!this.n) return;
+    const { ctx, voiceBus } = this.n;
+    voiceBus.gain.setTargetAtTime(this.voiceGain(), ctx.currentTime, 0.08);
+  }
+
+  private clip: HTMLAudioElement | null = null;
+  private sources = new WeakMap<HTMLAudioElement, MediaElementAudioSourceNode>();
+
+  /**
+   * Play one of the guide's recorded lines. Resolves when it finishes, is
+   * interrupted, or fails to load (a missing file never blocks the flow).
+   */
+  playVoice(url: string): Promise<void> {
+    this.stopVoice();
+    if (this.voice === 0 || this.allMuted) return Promise.resolve();
+    const el = new Audio(url);
+    el.preload = "auto";
+    this.clip = el;
+    if (this.n) {
+      let src = this.sources.get(el);
+      if (!src) {
+        src = this.n.ctx.createMediaElementSource(el);
+        this.sources.set(el, src);
+      }
+      src.connect(this.n.voiceBus);
+    } else {
+      el.volume = Math.min(1, this.voice);
+    }
+    return new Promise((resolve) => {
+      const done = () => {
+        el.removeEventListener("ended", done);
+        el.removeEventListener("error", done);
+        el.removeEventListener("pause", done);
+        if (this.clip === el) this.clip = null;
+        resolve();
+      };
+      el.addEventListener("ended", done);
+      el.addEventListener("error", done);
+      el.addEventListener("pause", done);
+      el.play().catch(done);
+    });
+  }
+
+  /** Play a blob of speech (from /api/speak) through the same voice bus. */
+  playVoiceBlob(blob: Blob): Promise<void> {
+    const url = URL.createObjectURL(blob);
+    return this.playVoice(url).finally(() => URL.revokeObjectURL(url));
+  }
+
+  stopVoice() {
+    if (this.clip) {
+      this.clip.pause();
+      this.clip = null;
+    }
   }
 
   atmosphere() {
@@ -344,5 +419,6 @@ export function speak(text: string) {
 }
 
 export function hush() {
+  audio.stopVoice();
   if (typeof window !== "undefined" && "speechSynthesis" in window) window.speechSynthesis.cancel();
 }

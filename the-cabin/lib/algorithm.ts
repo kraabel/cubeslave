@@ -22,6 +22,9 @@ export const TIERS: Tier[] = [
 /** Low scorers split by why they scored low: distance from the system, or irrelevance to it. */
 const UNNOTICED: Tier = { min: 0, title: "Beneath his notice", line: "A cog, in his terms. Not worth the stamp." };
 
+/** Every tier a visitor can land in, including the low-autonomy variant. */
+export const ALL_TIERS: Tier[] = [...TIERS, UNNOTICED];
+
 export interface Result {
   risk: number; // 0..100
   scores: Scores;

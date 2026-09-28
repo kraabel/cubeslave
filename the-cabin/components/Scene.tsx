@@ -8,7 +8,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import PaperSwarm, { type Formation } from "./PaperSwarm";
 
-export type Stage = "gate" | "intro" | "question" | "divining" | "verdict";
+export type Stage = "gate" | "guide" | "intro" | "question" | "divining" | "verdict";
 
 interface SceneProps {
   stage: Stage;
@@ -271,6 +271,7 @@ function useFormation({ stage, step, risk }: SceneProps): Formation {
   }, [stage]);
 
   if (stage === "gate") return loop < 0 ? "inflow" : HOME_LOOP[loop].f;
+  if (stage === "guide") return "nest";
   if (stage === "intro") return "sphere";
   if (stage === "question") return QUESTION_SHAPES[step % QUESTION_SHAPES.length];
   if (stage === "divining") return "vortex";
@@ -291,6 +292,10 @@ const SHOTS: Record<Stage, { wide: Shot; tall: Shot }> = {
   gate: {
     wide: { pos: [0.6, 2.8, 10.5], look: [-3.1, 2.3, 0] },
     tall: { pos: [0, 2.8, 18], look: [0, -1.5, 0] },
+  },
+  guide: {
+    wide: { pos: [0, 3.4, 13], look: [0, 3.9, 0] },
+    tall: { pos: [0, 3.4, 17], look: [0, 4.6, 0] },
   },
   intro: {
     wide: { pos: [0, 2.8, 11], look: [0, 0.4, 0] },

@@ -24,6 +24,32 @@ else still works.
 `preview/the-cabin.html`, that opens in any browser. It has no API route, so it
 always uses the offline narration.
 
+## The guides
+
+Visitors choose one of four fictional guides before the quiz. Each has a
+background, a lens (what they notice in your answers), and an ElevenLabs voice.
+The guide changes how your result is read to you, never the score.
+
+| Guide | Role | Lens | ElevenLabs voice |
+| --- | --- | --- | --- |
+| Dr. Elias Marr | Forensic psychologist | Motive and grievance | Signal |
+| Warren Cole | Retired criminal profiler | Victimology: who was chosen and how they were found | Jason Abadi |
+| Professor Aldous Wren | Psychoanalyst and historian of ideas | Where you stand in the manifesto's argument | Eldrin |
+| Dr. Vera Lorne | Clinical psychologist, isolation and radicalization | Contempt, and whether scorn became a target | Ariana |
+
+Everything a guide says on a fixed script (greeting, intro, loading line, and a
+verdict line for each of the six tiers) is pre-rendered in `public/voices/`.
+To change a line, edit `lib/guides.ts` and re-render it:
+
+```bash
+ELEVENLABS_API_KEY=... npm run voices -- marr intro   # one clip
+ELEVENLABS_API_KEY=... npm run voices                 # all 36
+```
+
+With `ELEVENLABS_API_KEY` set on the server, the guide also reads your personal
+reading aloud on the result screen (`app/api/speak`). Without it, the reading
+stays on screen as text.
+
 ## How it works
 
 | Piece | File | What it does |

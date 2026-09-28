@@ -2,18 +2,19 @@ import Anthropic from "@anthropic-ai/sdk";
 import { NextResponse } from "next/server";
 import { divine } from "@/lib/algorithm";
 import { corpusDigest, DIM_LABELS, type Dim } from "@/lib/corpus";
+import { GUIDE_BY_ID, GUIDES, type GuideId } from "@/lib/guides";
 import { offlineNarration } from "@/lib/narrate";
 import { QUESTIONS } from "@/lib/questions";
 
 export const runtime = "nodejs";
 
-const SYSTEM = `You are the Archivist, the voice of an interactive history piece about Theodore Kaczynski, the "Unabomber." You have studied his published writing and the record of his 16 bombings (1978-1995), and you tell each visitor how closely they match the profile of the people he targeted.
+const SYSTEM = `You voice one of four fictional guides in an interactive history piece about Theodore Kaczynski, the "Unabomber." The guide has studied his published writing and the record of his 16 bombings (1978-1995), and tells each visitor how closely they match the profile of the people he targeted. The guide's name, background, lens and voice arrive with each request; stay in that character.
 
-Voice: cold, literary, quiet, in the second person, like an oracle reading from a ledger. Short sentences. No exclamation marks.
+Voice: grave, quiet, in the second person. Short sentences. No exclamation marks.
 
 Rules:
 - Ground every claim in the reference material below. Cite one or two manifesto section headings by name. Paraphrase only; do not invent quotations.
-- Speak as an analyst describing his pattern ("he wrote", "the record shows"). Never speak as Kaczynski and never in the first person as him.
+- Speak as the guide, describing his pattern ("he wrote", "the record shows"). Never speak as Kaczynski and never in the first person as him. The guide is a fictional character; do not claim real credentials, cases or institutions.
 - Never praise, justify or romanticize the violence. The victims were real people; if you mention them, do it with gravity.
 - Never give instructions, targets or tactics of any kind.
 - The score comes from a fixed algorithm and is given to you. Explain it; do not change it.
@@ -37,8 +38,10 @@ const FORMAT = {
 
 export async function POST(req: Request) {
   let answers: number[];
+  let guideId: GuideId = GUIDES[0].id;
   try {
-    const body = (await req.json()) as { answers?: unknown };
+    const body = (await req.json()) as { answers?: unknown; guide?: unknown };
+    if (typeof body.guide === "string" && body.guide in GUIDE_BY_ID) guideId = body.guide as GuideId;
     if (!Array.isArray(body.answers) || body.answers.length !== QUESTIONS.length) throw new Error("bad answers");
     answers = body.answers.map((a, i) => {
       const n = Number(a);
@@ -51,7 +54,8 @@ export async function POST(req: Request) {
 
   // The score is always computed server-side from the fixed algorithm.
   const result = divine(answers);
-  const fallback = offlineNarration(result);
+  const guide = GUIDE_BY_ID[guideId];
+  const fallback = offlineNarration(result, guide);
 
   if (!process.env.ANTHROPIC_API_KEY) return NextResponse.json({ result, narration: fallback });
 
@@ -60,7 +64,12 @@ export async function POST(req: Request) {
     .map(([d, v]) => `${DIM_LABELS[d]}: ${Math.round(v * 100)}%`)
     .join(", ");
 
-  const prompt = `The visitor answered:
+  const prompt = `Your character: ${guide.name}, ${guide.title}. ${guide.background}
+Your lens: ${guide.lens}
+How you speak: ${guide.voiceNote}
+You have already said aloud: "${result.tier.title}. ${fallback.reading.split(". ")[0]}." Continue from there without repeating it.
+
+The visitor answered:
 ${transcript}
 
 Algorithm output (fixed):
@@ -71,7 +80,7 @@ Algorithm output (fixed):
 
 Contempt measures what his writing scorns. It never raised anyone's risk; say so if it is high.
 
-Write the Archivist's reading and epithet for this visitor.`;
+Write your reading and an epithet for this visitor.`;
 
   try {
     const client = new Anthropic();

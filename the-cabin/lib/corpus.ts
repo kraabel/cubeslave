@@ -60,7 +60,7 @@ export interface Theme {
 export const THEMES: Theme[] = [
   {
     section: "Introduction",
-    gist: "Opens by calling the Industrial Revolution and its consequences a disaster for the human race.",
+    gist: "It opens by calling the Industrial Revolution and its consequences a disaster for the human race.",
     dims: ["tech", "system"],
   },
   {
@@ -80,12 +80,12 @@ export const THEMES: Theme[] = [
   },
   {
     section: "The Psychology of Modern Leftism",
-    gist: "Diagnoses what he calls oversocialization and feelings of inferiority. The target of scorn, not of the bombs.",
+    gist: "It diagnoses what he calls oversocialization and feelings of inferiority. The target of scorn, not of the bombs.",
     dims: ["contempt"],
   },
   {
     section: "Control of Human Behavior",
-    gist: "Warns of propaganda, advertising and psychological technique, and of biological engineering, reshaping people to suit the system.",
+    gist: "It warns of propaganda, advertising and psychological technique, and of biological engineering, reshaping people to suit the system.",
     dims: ["manipulation", "tech"],
   },
   {
@@ -100,12 +100,12 @@ export const THEMES: Theme[] = [
   },
   {
     section: "Revolution Is Easier than Reform",
-    gist: "Argues the system cannot be reformed. Reformers and conservatives who cheer economic growth are dismissed as naive.",
+    gist: "It argues the system cannot be reformed. Reformers and conservatives who cheer economic growth are dismissed as naive.",
     dims: ["contempt", "system"],
   },
   {
     section: "Strategy",
-    gist: "Names wild nature as the positive ideal, and computer scientists, biologists and propagandists as drivers of the system.",
+    gist: "It names wild nature as the positive ideal, and computer scientists, biologists and propagandists as drivers of the system.",
     dims: ["tech", "manipulation", "autonomy"],
   },
 ];

@@ -1,5 +1,6 @@
 import { THEMES, type Dim } from "./corpus";
 import type { Result } from "./algorithm";
+import { GUIDES, tierKeyOf, type Guide } from "./guides";
 
 export interface Narration {
   epithet: string; // 2-5 word name the oracle gives you
@@ -17,7 +18,7 @@ const LEAD_THEME: Partial<Record<Dim, string>> = {
 };
 
 /** Deterministic narration used when no API key is configured or the call fails. */
-export function offlineNarration(r: Result): Narration {
+export function offlineNarration(r: Result, guide: Guide = GUIDES[0]): Narration {
   const s = r.scores;
   const ranked = (Object.entries(s) as [Dim, number][])
     .filter(([d]) => d !== "contempt" && d !== "autonomy")
@@ -26,14 +27,7 @@ export function offlineNarration(r: Result): Narration {
   const theme = THEMES.find((t) => t.section === LEAD_THEME[lead]) ?? THEMES[0];
   const shelter = THEMES.find((t) => t.section === "The Power Process")!;
 
-  const opening =
-    r.risk >= 60
-      ? `I have read the pages and the record together, and you are written in both.`
-      : r.risk >= 35
-        ? `I have read the pages and the record. You appear in the margins of both.`
-        : r.risk >= 15
-          ? `I have read the pages and the record. You are in the pages, not the record.`
-          : `I have read the pages and the record. Neither holds your name.`;
+  const opening = guide.openers[tierKeyOf(r.tier.title)];
 
   const middle =
     r.risk >= 15
@@ -47,7 +41,7 @@ export function offlineNarration(r: Result): Narration {
 
   return {
     epithet: r.archetype.name,
-    reading: `${opening} ${middle}${contempt} ${r.tier.line}`,
+    reading: `${opening} ${middle}${contempt}`,
     source: "offline",
   };
 }

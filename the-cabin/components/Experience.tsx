@@ -4,23 +4,19 @@ import dynamic from "next/dynamic";
 import { AnimatePresence, motion, useMotionValue, useSpring, useTransform } from "framer-motion";
 import { useCallback, useEffect, useState } from "react";
 import { divine, type Result } from "@/lib/algorithm";
-import { audio, hush, speak } from "@/lib/audio";
+import { audio, hush } from "@/lib/audio";
 import { ATTACKS, DIM_LABELS, THEMES, TOLL, WORKS, type Dim } from "@/lib/corpus";
+import { clipUrl, GUIDE_BY_ID, GUIDES, tierKeyOf, type GuideId } from "@/lib/guides";
 import { offlineNarration, type Narration } from "@/lib/narrate";
 import { QUESTIONS } from "@/lib/questions";
 import { Arrow, Blob, OrganicDefs } from "./Organic";
+import GuideGlyph from "./GuideGlyph";
 import type { Stage } from "./Scene";
 import SoundDeck from "./SoundDeck";
 import Typewriter from "./Typewriter";
 
 const Scene = dynamic(() => import("./Scene"), { ssr: false });
 
-const INTRO = [
-  "I have read everything he published.",
-  "The manifesto. The letters. The books written from a cell.",
-  `I have studied the ${TOLL.devices} packages, and the ${TOLL.killed + TOLL.injured} people they found.`,
-  "Answer ten questions. I will tell you whether he would have come for you.",
-];
 
 const DIVINING = [
   "Reading Industrial Society and Its Future…",
@@ -83,6 +79,10 @@ export default function Experience() {
   const [narration, setNarration] = useState<Narration | null>(null);
   const [count, setCount] = useState(0);
   const [overlay, setOverlay] = useState<Overlay>(null);
+  const [guideId, setGuideId] = useState<GuideId>(GUIDES[0].id);
+  const [previewing, setPreviewing] = useState<GuideId | null>(null);
+  const guide = GUIDE_BY_ID[guideId];
+  const INTRO = guide.intro;
   const [reasoning, setReasoning] = useState(false);
 
   // Pointer parallax: the question floats with the cursor.
@@ -103,9 +103,27 @@ export default function Experience() {
   const begin = () => {
     audio.start();
     audio.select();
+    setStage("guide");
+  };
+
+  const previewGuide = (id: GuideId) => {
+    if (previewing === id) {
+      hush();
+      setPreviewing(null);
+      return;
+    }
+    setPreviewing(id);
+    audio.playVoice(clipUrl(id, "greeting")).then(() => setPreviewing((p) => (p === id ? null : p)));
+  };
+
+  const chooseGuide = (id: GuideId) => {
+    hush();
+    setPreviewing(null);
+    audio.select();
+    setGuideId(id);
     setIntroLine(0);
     setStage("intro");
-    setTimeout(() => speak(INTRO.join(" ")), 900);
+    setTimeout(() => audio.playVoice(clipUrl(id, "intro")), 700);
   };
 
   const startQuestions = () => {
@@ -134,7 +152,8 @@ export default function Experience() {
   const goBack = () => {
     audio.hover();
     if (qi === 0) {
-      setStage("gate");
+      hush();
+      setStage("guide");
       return;
     }
     const prev = answers.slice(0, -1);
@@ -163,12 +182,13 @@ export default function Experience() {
     const fetched = fetch("/api/verdict", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ answers }),
+      body: JSON.stringify({ answers, guide: guideId }),
     })
       .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
       .then((d: { result: Result; narration: Narration }) => d)
-      .catch(() => ({ result: local, narration: offlineNarration(local) }));
+      .catch(() => ({ result: local, narration: offlineNarration(local, GUIDE_BY_ID[guideId]) }));
 
+    audio.playVoice(clipUrl(guideId, "divining"));
     const lines = DIVINING.map((_, i) => setTimeout(() => !cancelled && setDivLine(i), i * 2100));
     Promise.all([fetched, minWait]).then(([d]) => {
       if (cancelled) return;
@@ -182,7 +202,7 @@ export default function Experience() {
       cancelled = true;
       lines.forEach(clearTimeout);
     };
-  }, [stage, answers]);
+  }, [stage, answers, guideId]);
 
   // Verdict: count up to the score, then speak the reading.
   useEffect(() => {
@@ -195,12 +215,29 @@ export default function Experience() {
       if (k < 1) raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
-    const voice = setTimeout(() => narration && speak(narration.reading), 3200);
+    // The guide says the verdict (a recorded line), then, when the server can
+    // synthesize it, reads the personal reading in the same voice.
+    let cancelled = false;
+    const voice = setTimeout(async () => {
+      await audio.playVoice(clipUrl(guideId, `verdict-${tierKeyOf(result.tier.title)}`));
+      if (cancelled || !narration) return;
+      try {
+        const res = await fetch("/api/speak", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ guide: guideId, text: narration.reading }),
+        });
+        if (!cancelled && res.ok) await audio.playVoiceBlob(await res.blob());
+      } catch {
+        // No live speech available; the reading stays on screen as text.
+      }
+    }, 1400);
     return () => {
+      cancelled = true;
       cancelAnimationFrame(raf);
       clearTimeout(voice);
     };
-  }, [stage, result, narration]);
+  }, [stage, result, narration, guideId]);
 
   const restart = () => {
     hush();
@@ -243,6 +280,12 @@ export default function Experience() {
           The Ted test
         </button>
         <nav className="nav">
+          {(stage === "intro" || stage === "verdict" || stage === "question" || stage === "divining") && (
+            <span className="guide-chip" title={`${guide.name}, ${guide.title}`}>
+              <GuideGlyph kind={guide.glyph} />
+              {guide.short}
+            </span>
+          )}
           <button className="nav-link" onClick={() => setOverlay("archive")}>
             Archive
           </button>
@@ -274,6 +317,51 @@ export default function Experience() {
                 Explore sources
               </button>
             </motion.div>
+          </motion.section>
+        )}
+
+        {stage === "guide" && (
+          <motion.section key="guide" className="panel guides" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, y: -20, filter: "blur(10px)" }} transition={{ duration: 0.9 }}>
+            <p className="eyebrow">Choose your guide</p>
+            <h2>Who should read your answers?</h2>
+            <p className="lede">Four specialists read the same record through different lenses. Your score is the same whoever you choose. What they notice is not.</p>
+            <ul className="guide-grid">
+              {GUIDES.map((g, i) => (
+                <motion.li
+                  key={g.id}
+                  className="guide-card"
+                  data-speaking={previewing === g.id}
+                  initial={{ opacity: 0, y: 24, filter: "blur(8px)" }}
+                  animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+                  transition={{ delay: 0.25 + i * 0.12, duration: 0.8, ease }}
+                >
+                  <div className="guide-head">
+                    <GuideGlyph kind={g.glyph} speaking={previewing === g.id} />
+                    <div>
+                      <p className="guide-name">{g.name}</p>
+                      <p className="guide-title">{g.title}</p>
+                    </div>
+                  </div>
+                  <p className="guide-bg">{g.background}</p>
+                  <p className="guide-lens">
+                    <span>Lens</span>
+                    {g.lens}
+                  </p>
+                  <div className="guide-actions">
+                    <button className="listen" onClick={() => previewGuide(g.id)} aria-pressed={previewing === g.id}>
+                      <svg viewBox="0 0 16 16" aria-hidden>
+                        {previewing === g.id ? <path d="M4 3h3v10H4zM9 3h3v10H9z" /> : <path d="M4 2.5v11l9-5.5z" />}
+                      </svg>
+                      {previewing === g.id ? "Stop" : `Hear ${g.short}`}
+                    </button>
+                    <Blob variant="primary" size="sm" onClick={() => chooseGuide(g.id)}>
+                      Choose <Arrow />
+                    </Blob>
+                  </div>
+                </motion.li>
+              ))}
+            </ul>
+            <p className="fine">The guides are fictional characters, voiced with ElevenLabs.</p>
           </motion.section>
         )}
 
@@ -385,7 +473,7 @@ export default function Experience() {
               {reasoning && (
                 <motion.div className="reasoning" initial={{ opacity: 0, y: 16, filter: "blur(8px)" }} animate={{ opacity: 1, y: 0, filter: "blur(0px)" }} exit={{ opacity: 0, y: 10, filter: "blur(8px)" }} transition={{ duration: 0.8, ease }}>
                   <p className="label">
-                    Entered in the archive as <strong>{narration.epithet}</strong>
+                    {guide.name} enters you as <strong>{narration.epithet}</strong>
                   </p>
                   <p className="reading">
                     <Typewriter text={narration.reading} speed={14} sound={false} />
@@ -501,7 +589,7 @@ export default function Experience() {
                     </li>
                   </ol>
                   <p className="fine">
-                    The score always comes from the fixed model. When an AI writes your reading, it works from the same summary of his writing and the public record, and it is instructed never to speak as him, praise the attacks, or describe methods. This piece covers real violence and real victims; the archive lists every one.
+                    Your guide is a fictional character: Dr. Elias Marr, Warren Cole, Professor Aldous Wren and Dr. Vera Lorne were written for this piece, and each changes how your result is read to you, never the score. The score always comes from the fixed model. When an AI writes your reading, it works from the same summary of his writing and the public record, and it is instructed never to speak as him, praise the attacks, or describe methods. This piece covers real violence and real victims; the archive lists every one.
                   </p>
                 </>
               )}
