@@ -2,19 +2,18 @@
 
 import dynamic from "next/dynamic";
 import { AnimatePresence, motion, useMotionValue, useSpring, useTransform } from "framer-motion";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { divine, type Result } from "@/lib/algorithm";
 import { audio, hush, speak } from "@/lib/audio";
-import { ATTACKS, DIM_LABELS, TOLL, WORKS, type Dim } from "@/lib/corpus";
+import { ATTACKS, DIM_LABELS, THEMES, TOLL, WORKS, type Dim } from "@/lib/corpus";
 import { offlineNarration, type Narration } from "@/lib/narrate";
 import { QUESTIONS } from "@/lib/questions";
+import { Arrow, Blob, OrganicDefs } from "./Organic";
 import type { Stage } from "./Scene";
 import SoundDeck from "./SoundDeck";
 import Typewriter from "./Typewriter";
 
 const Scene = dynamic(() => import("./Scene"), { ssr: false });
-
-const ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"];
 
 const INTRO = [
   "I have read everything he published.",
@@ -31,10 +30,47 @@ const DIVINING = [
 
 const BAR_DIMS: Dim[] = ["tech", "system", "manipulation", "visibility", "institution", "autonomy", "contempt"];
 
-const float = (i: number) => ({
-  y: [0, -5, 0],
-  transition: { duration: 4 + (i % 3), repeat: Infinity, ease: "easeInOut" as const, delay: i * 0.35 },
-});
+const pad = (n: number) => String(n).padStart(2, "0");
+
+const ease = [0.2, 0.7, 0.2, 1] as const;
+
+type Overlay = "archive" | "about" | null;
+
+function SoundToggle() {
+  const [started, setStarted] = useState(false);
+  const [muted, setMuted] = useState(false);
+
+  useEffect(() => {
+    const id = setInterval(() => setStarted(audio.started), 500);
+    return () => clearInterval(id);
+  }, []);
+
+  const click = () => {
+    if (!audio.started) {
+      audio.start();
+      setStarted(true);
+      return;
+    }
+    const m = !muted;
+    audio.setAllMuted(m);
+    setMuted(m);
+  };
+
+  const label = !started ? "Enable sound" : muted ? "Sound off" : "Sound on";
+  return (
+    <Blob variant="outline" size="sm" onClick={click} aria-pressed={started && !muted} className="sound-toggle">
+      <svg className="speaker" viewBox="0 0 20 16" aria-hidden>
+        <path className="cone" d="M2 6 H5 L10 2 V14 L5 10 H2 Z" />
+        {started && !muted ? (
+          <path className="waves" d="M13 5.5 Q15 8 13 10.5 M15.5 3.5 Q19 8 15.5 12.5" />
+        ) : (
+          <path className="waves" d="M13 5 L18 11 M18 5 L13 11" />
+        )}
+      </svg>
+      {label}
+    </Blob>
+  );
+}
 
 export default function Experience() {
   const [stage, setStage] = useState<Stage>("gate");
@@ -46,14 +82,14 @@ export default function Experience() {
   const [result, setResult] = useState<Result | null>(null);
   const [narration, setNarration] = useState<Narration | null>(null);
   const [count, setCount] = useState(0);
-  const [memorial, setMemorial] = useState(false);
-  const [readingDone, setReadingDone] = useState(false);
+  const [overlay, setOverlay] = useState<Overlay>(null);
+  const [reasoning, setReasoning] = useState(false);
 
-  // Pointer parallax for the floating card.
+  // Pointer parallax: the question floats with the cursor.
   const mx = useMotionValue(0);
   const my = useMotionValue(0);
-  const rx = useSpring(useTransform(my, [-1, 1], [5, -5]), { stiffness: 60, damping: 18 });
-  const ry = useSpring(useTransform(mx, [-1, 1], [-7, 7]), { stiffness: 60, damping: 18 });
+  const rx = useSpring(useTransform(my, [-1, 1], [3, -3]), { stiffness: 50, damping: 18 });
+  const ry = useSpring(useTransform(mx, [-1, 1], [-4, 4]), { stiffness: 50, damping: 18 });
 
   useEffect(() => {
     const move = (e: PointerEvent) => {
@@ -64,13 +100,15 @@ export default function Experience() {
     return () => window.removeEventListener("pointermove", move);
   }, [mx, my]);
 
-  const enter = () => {
+  const begin = () => {
     audio.start();
+    audio.select();
+    setIntroLine(0);
     setStage("intro");
     setTimeout(() => speak(INTRO.join(" ")), 900);
   };
 
-  const begin = () => {
+  const startQuestions = () => {
     hush();
     audio.select();
     setStage("question");
@@ -93,16 +131,28 @@ export default function Experience() {
     [answers, picked],
   );
 
+  const goBack = () => {
+    audio.hover();
+    if (qi === 0) {
+      setStage("gate");
+      return;
+    }
+    const prev = answers.slice(0, -1);
+    setAnswers(prev);
+    setQi(prev.length);
+    audio.setTension(prev.length / QUESTIONS.length);
+  };
+
   // Keyboard: 1-5 to answer.
   useEffect(() => {
-    if (stage !== "question") return;
+    if (stage !== "question" || overlay) return;
     const onKey = (e: KeyboardEvent) => {
       const n = Number(e.key);
       if (n >= 1 && n <= QUESTIONS[qi].options.length) choose(n - 1);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [stage, qi, choose]);
+  }, [stage, qi, choose, overlay]);
 
   // Divining: the reading and the fetch run together; the reveal waits for both.
   useEffect(() => {
@@ -162,9 +212,21 @@ export default function Experience() {
     setNarration(null);
     setCount(0);
     setDivLine(0);
-    setReadingDone(false);
-    setMemorial(false);
+    setReasoning(false);
+    setOverlay(null);
     setStage("question");
+  };
+
+  const home = () => {
+    hush();
+    audio.setTension(0);
+    setAnswers([]);
+    setQi(0);
+    setResult(null);
+    setNarration(null);
+    setReasoning(false);
+    setOverlay(null);
+    setStage("gate");
   };
 
   const progress = stage === "question" ? answers.length / QUESTIONS.length : stage === "gate" || stage === "intro" ? 0 : 1;
@@ -172,69 +234,75 @@ export default function Experience() {
 
   return (
     <main className="stage" data-stage={stage}>
-      <Scene stage={stage} progress={progress} risk={result?.risk ?? null} />
+      <OrganicDefs />
+      <Scene stage={stage} step={qi} progress={progress} risk={result?.risk ?? null} />
 
-      <SoundDeck />
-
-      {stage === "question" && (
-        <div className="constellation" aria-hidden>
-          {QUESTIONS.map((_, i) => (
-            <span key={i} data-state={i < answers.length ? "done" : i === qi ? "now" : "todo"} />
-          ))}
-        </div>
-      )}
+      <header className="topbar">
+        <button className="brand" onClick={home} aria-label="The Ted test, home">
+          <span className="mark" aria-hidden />
+          The Ted test
+        </button>
+        <nav className="nav">
+          <button className="nav-link" onClick={() => setOverlay("archive")}>
+            Archive
+          </button>
+          <button className="nav-link" onClick={() => setOverlay("about")}>
+            About
+          </button>
+          <SoundToggle />
+        </nav>
+      </header>
 
       <AnimatePresence mode="wait">
         {stage === "gate" && (
-          <motion.section
-            key="gate"
-            className="panel gate"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0, scale: 1.04, filter: "blur(12px)" }}
-            transition={{ duration: 1.2 }}
-          >
-            <motion.p className="eyebrow" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4, duration: 1.2 }}>
-              An oracle trained on the Unabomber&apos;s writing and on the record of whom he chose
+          <motion.section key="gate" className="panel hero" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, x: -30, filter: "blur(10px)" }} transition={{ duration: 1 }}>
+            <h1>
+              {["Would Ted", "have killed", "you?"].map((line, i) => (
+                <motion.span key={line} className="line" initial={{ opacity: 0, y: 40, filter: "blur(12px)" }} animate={{ opacity: 1, y: 0, filter: "blur(0px)" }} transition={{ delay: 0.3 + i * 0.18, duration: 1.2, ease }}>
+                  {line}
+                </motion.span>
+              ))}
+            </h1>
+            <motion.p className="lede" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 1.1, duration: 1 }}>
+              Answer 10 questions about your work, your beliefs, and the technology you depend on.
             </motion.p>
-            <motion.h1 initial={{ opacity: 0, letterSpacing: "0.6em" }} animate={{ opacity: 1, letterSpacing: "0.22em" }} transition={{ delay: 0.2, duration: 2.4, ease: "easeOut" }}>
-              THE CABIN
-            </motion.h1>
-            <motion.p className="question-lede" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.4, duration: 1.2 }}>
-              Would Ted Kaczynski have come for you?
-            </motion.p>
-            <motion.button className="enter" onClick={enter} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 2, duration: 1 }} whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.98 }}>
-              Enter the woods
-            </motion.button>
-            <motion.p className="fine" initial={{ opacity: 0 }} animate={{ opacity: 0.7 }} transition={{ delay: 2.6, duration: 1.2 }}>
-              Sound on, headphones recommended. This piece covers real violence: {TOLL.killed} people killed and {TOLL.injured} injured, {TOLL.span}.
-            </motion.p>
+            <motion.div className="actions" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 1.5, duration: 1 }}>
+              <Blob variant="primary" onClick={begin}>
+                Begin the test <Arrow />
+              </Blob>
+              <button className="text-link" onClick={() => setOverlay("archive")}>
+                Explore sources
+              </button>
+            </motion.div>
           </motion.section>
         )}
 
         {stage === "intro" && (
-          <motion.section key="intro" className="panel intro" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, y: -30, filter: "blur(10px)" }} transition={{ duration: 1 }}>
+          <motion.section key="intro" className="panel intro" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, y: -24, filter: "blur(10px)" }} transition={{ duration: 1 }}>
             {INTRO.slice(0, introLine + 1).map((line, i) => (
-              <motion.p key={i} className="oracle-line" initial={{ opacity: 0, y: 8 }} animate={{ opacity: i === introLine ? 1 : 0.45, y: 0 }} transition={{ duration: 0.8 }}>
-                <Typewriter
-                  text={line}
-                  delay={i === 0 ? 900 : 300}
-                  onDone={() => {
-                    setTimeout(() => setIntroLine((n) => Math.max(n, i + 1)), 700);
-                  }}
-                />
+              <motion.p key={i} className="oracle-line" initial={{ opacity: 0, y: 8 }} animate={{ opacity: i === introLine ? 1 : 0.4, y: 0 }} transition={{ duration: 0.8 }}>
+                <Typewriter text={line} delay={i === 0 ? 900 : 300} onDone={() => setTimeout(() => setIntroLine((n) => Math.max(n, i + 1)), 700)} />
               </motion.p>
             ))}
-            {introLine >= INTRO.length && (
-              <motion.button className="enter" onClick={begin} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8 }} whileHover={{ scale: 1.03 }}>
-                Begin
-              </motion.button>
-            )}
-            {introLine < INTRO.length && (
-              <button className="skip" onClick={() => { hush(); setIntroLine(INTRO.length); }}>
-                Skip
-              </button>
-            )}
+            <div className="actions center">
+              {introLine >= INTRO.length ? (
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8 }}>
+                  <Blob variant="primary" onClick={startQuestions}>
+                    Continue <Arrow />
+                  </Blob>
+                </motion.div>
+              ) : (
+                <button
+                  className="text-link"
+                  onClick={() => {
+                    hush();
+                    setIntroLine(INTRO.length);
+                  }}
+                >
+                  Skip the introduction
+                </button>
+              )}
+            </div>
           </motion.section>
         )}
 
@@ -242,36 +310,35 @@ export default function Experience() {
           <motion.section
             key={`q-${qi}`}
             className="panel question"
-            style={{ rotateX: rx, rotateY: ry, transformPerspective: 1200 }}
-            initial={{ opacity: 0, y: 40, scale: 0.96, filter: "blur(14px)" }}
-            animate={{ opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }}
-            exit={{ opacity: 0, y: -40, scale: 1.03, filter: "blur(14px)" }}
-            transition={{ duration: 0.9, ease: [0.2, 0.7, 0.2, 1] }}
+            style={{ rotateX: rx, rotateY: ry, transformPerspective: 1400 }}
+            initial={{ opacity: 0, y: 30, filter: "blur(12px)" }}
+            animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+            exit={{ opacity: 0, y: -30, filter: "blur(12px)" }}
+            transition={{ duration: 0.8, ease }}
           >
-            <p className="numeral">
-              {ROMAN[qi]} <span>/ X</span>
+            <div className="dots" aria-hidden>
+              {QUESTIONS.map((_, i) => (
+                <span key={i} data-state={i < answers.length ? "done" : i === qi ? "now" : "todo"} />
+              ))}
+            </div>
+            <p className="count">
+              {pad(qi + 1)} / {QUESTIONS.length}
             </p>
-            <h2>
-              <Typewriter text={q.prompt} speed={26} delay={350} />
-            </h2>
-            <motion.p className="whisper" initial={{ opacity: 0 }} animate={{ opacity: 0.6 }} transition={{ delay: 1.4, duration: 1.4 }}>
+            <h2>{q.prompt}</h2>
+            <motion.p className="whisper" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.9, duration: 1.2 }}>
               {q.whisper}
             </motion.p>
             <ol className="options">
               {q.options.map((o, i) => (
-                <motion.li key={o.label} initial={{ opacity: 0, x: -18, filter: "blur(6px)" }} animate={{ opacity: picked === null || picked === i ? 1 : 0.15, x: 0, filter: "blur(0px)" }} transition={{ delay: picked === null ? 0.9 + i * 0.12 : 0, duration: 0.6 }}>
-                  <motion.button
-                    className="option"
-                    data-picked={picked === i}
-                    onClick={() => choose(i)}
-                    onMouseEnter={() => audio.hover()}
-                    animate={float(i)}
-                    whileHover={{ x: 10 }}
-                    whileTap={{ scale: 0.98 }}
-                  >
-                    <kbd>{i + 1}</kbd>
-                    <span>{o.label}</span>
-                  </motion.button>
+                <motion.li
+                  key={o.label}
+                  initial={{ opacity: 0, y: 14, filter: "blur(8px)" }}
+                  animate={{ opacity: picked === null || picked === i ? 1 : 0.2, y: 0, filter: "blur(0px)" }}
+                  transition={{ delay: picked === null ? 0.35 + i * 0.09 : 0, duration: 0.7, ease }}
+                >
+                  <Blob variant="glass" active={picked === i} onClick={() => choose(i)} onMouseEnter={() => audio.hover()} aria-keyshortcuts={String(i + 1)}>
+                    {o.label}
+                  </Blob>
                 </motion.li>
               ))}
             </ol>
@@ -289,92 +356,156 @@ export default function Experience() {
         )}
 
         {stage === "verdict" && result && narration && (
-          <motion.section key="verdict" className="panel verdict" initial={{ opacity: 0, scale: 0.94 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} transition={{ duration: 1.6, ease: "easeOut" }}>
-            <p className="eyebrow">Target-profile match</p>
-            <div className="score" data-level={result.risk >= 60 ? "high" : result.risk >= 15 ? "mid" : "low"}>
-              {count}
-              <span>%</span>
-            </div>
-            <motion.h2 initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 2.6, duration: 1 }}>
+          <motion.section key="verdict" className="panel verdict" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 1.2 }}>
+            <motion.p className="eyebrow" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4, duration: 1 }}>
+              Your result
+              <span className="match-chip" data-level={result.risk >= 60 ? "high" : result.risk >= 15 ? "mid" : "low"}>
+                {count}% target-profile match
+              </span>
+            </motion.p>
+            <motion.h2 initial={{ opacity: 0, y: 24, filter: "blur(10px)" }} animate={{ opacity: 1, y: 0, filter: "blur(0px)" }} transition={{ delay: 0.8, duration: 1.2, ease }}>
               {result.tier.title}
             </motion.h2>
-            <motion.p className="epithet" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 3, duration: 1 }}>
-              Entered in the ledger as <strong>{narration.epithet}</strong>
+            <motion.p className="lede" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.6, duration: 1 }}>
+              {result.tier.line} Your nearest historical profile is {result.archetype.name.replace(/^The /, "the ")}.
             </motion.p>
-            <motion.div className="reading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 3.2, duration: 0.6 }}>
-              <Typewriter text={narration.reading} speed={18} delay={3300} onDone={() => setReadingDone(true)} />
+            <motion.div className="actions" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 2.2, duration: 1 }}>
+              <Blob variant="primary" onClick={() => setReasoning((r) => !r)} aria-expanded={reasoning}>
+                {reasoning ? "Hide reasoning" : "View reasoning"} <Arrow />
+              </Blob>
+              <Blob variant="outline" size="sm" onClick={() => setOverlay("archive")}>
+                Read sources
+              </Blob>
+              <button className="text-link" onClick={restart}>
+                Try again
+              </button>
             </motion.div>
 
-            <motion.div className="details" initial={{ opacity: 0, y: 16 }} animate={readingDone ? { opacity: 1, y: 0 } : { opacity: 0, y: 16 }} transition={{ duration: 1 }}>
-              <div className="match">
-                <p className="label">Nearest historical profile</p>
-                <p className="value">{result.archetype.name}</p>
-                <p className="sub">{result.archetype.line}</p>
-              </div>
-              <ul className="bars">
-                {BAR_DIMS.map((d, i) => (
-                  <li key={d} data-dim={d}>
-                    <span>{DIM_LABELS[d]}</span>
-                    <i>
-                      <motion.b initial={{ width: 0 }} animate={{ width: readingDone ? `${Math.round(result.scores[d] * 100)}%` : 0 }} transition={{ delay: 0.3 + i * 0.08, duration: 1.2, ease: "easeOut" }} />
-                    </i>
-                  </li>
-                ))}
-              </ul>
-              <p className="method">
-                Scored by a fixed model built from the manifesto&apos;s themes and the profiles of all {TOLL.devices} targets. Contempt is shown, but never raises your score: he scorned far more people than he attacked.
-                {narration.source === "claude" ? " Reading written by Claude from the same material." : ""}
-              </p>
-              <div className="actions">
-                <button className="enter" onClick={() => setMemorial(true)}>
-                  Remember them
-                </button>
-                <button className="ghost" onClick={restart}>
-                  Ask again
-                </button>
-              </div>
-            </motion.div>
+            <AnimatePresence>
+              {reasoning && (
+                <motion.div className="reasoning" initial={{ opacity: 0, y: 16, filter: "blur(8px)" }} animate={{ opacity: 1, y: 0, filter: "blur(0px)" }} exit={{ opacity: 0, y: 10, filter: "blur(8px)" }} transition={{ duration: 0.8, ease }}>
+                  <p className="label">
+                    Entered in the archive as <strong>{narration.epithet}</strong>
+                  </p>
+                  <p className="reading">
+                    <Typewriter text={narration.reading} speed={14} sound={false} />
+                  </p>
+                  <ul className="bars">
+                    {BAR_DIMS.map((d, i) => (
+                      <li key={d} data-dim={d}>
+                        <span>{DIM_LABELS[d]}</span>
+                        <i>
+                          <motion.b initial={{ width: 0 }} animate={{ width: `${Math.round(result.scores[d] * 100)}%` }} transition={{ delay: 0.4 + i * 0.08, duration: 1.2, ease: "easeOut" }} />
+                        </i>
+                        <em>{Math.round(result.scores[d] * 100)}</em>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="method">
+                    Scored by a fixed model built from the manifesto&apos;s themes and the profiles of all {TOLL.devices} targets. Contempt is shown but never raises your score; he scorned far more people than he attacked.
+                    {narration.source === "claude" ? " Reading written by Claude from the same material." : ""}
+                  </p>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </motion.section>
         )}
       </AnimatePresence>
 
+      <footer className="footbar">
+        <div className="foot-left">
+          {stage === "question" && (
+            <button className="back" onClick={goBack}>
+              <svg viewBox="0 0 20 12" aria-hidden>
+                <path d="M19 6 H2 M7 1 L2 6 L7 11" />
+              </svg>
+              Go back
+            </button>
+          )}
+          <p className="disclaimer">
+            {stage === "verdict" ? "This is an interpretation of your answers, not a prediction of violence." : "This thought experiment cannot predict violence."}
+          </p>
+        </div>
+        <SoundDeck />
+      </footer>
+
       <AnimatePresence>
-        {memorial && (
-          <motion.aside className="memorial" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.8 }}>
-            <div className="memorial-inner">
-              <p className="eyebrow">The record, {TOLL.span}</p>
-              <h2>
-                {TOLL.killed} killed. {TOLL.injured} injured.
-              </h2>
-              <p className="sub">Behind every score on this site is a person who opened a box.</p>
-              <ol>
-                {ATTACKS.map((a, i) => (
-                  <motion.li key={i} data-killed={!!a.killed} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 + i * 0.06 }}>
-                    <span className="year">{a.year}</span>
-                    <span className="who">
-                      {a.target}
-                      <em>
-                        {a.place}. {a.outcome}.
-                      </em>
-                    </span>
-                  </motion.li>
-                ))}
-              </ol>
-              <p className="label">What the oracle read</p>
-              <ul className="works">
-                {WORKS.map((w) => (
-                  <li key={w.title}>
-                    <strong>{w.title}</strong> ({w.year}). {w.note}
-                  </li>
-                ))}
-              </ul>
-              <p className="fine">
-                Kaczynski was arrested at his Montana cabin in April 1996, after his brother David recognized the manifesto&apos;s writing and went to the FBI. He died in federal custody in 2023.
-              </p>
-              <button className="ghost" onClick={() => setMemorial(false)}>
-                Close
+        {overlay && (
+          <motion.aside className="overlay" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.6 }} onClick={(e) => e.target === e.currentTarget && setOverlay(null)}>
+            <motion.div className="overlay-inner" initial={{ y: 24, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 12, opacity: 0 }} transition={{ duration: 0.7, ease }}>
+              <button className="close" onClick={() => setOverlay(null)} aria-label="Close">
+                <svg viewBox="0 0 16 16" aria-hidden>
+                  <path d="M3 3 L13 13 M13 3 L3 13" />
+                </svg>
               </button>
-            </div>
+
+              {overlay === "archive" ? (
+                <>
+                  <p className="eyebrow">The archive</p>
+                  <h2>
+                    {TOLL.killed} killed. {TOLL.injured} injured.
+                  </h2>
+                  <p className="lede">Sixteen devices between {TOLL.span}. Behind every score on this site is a person who opened a box.</p>
+                  <ol className="record">
+                    {ATTACKS.map((a, i) => (
+                      <li key={i} data-killed={!!a.killed}>
+                        <span className="year">{a.year}</span>
+                        <span className="who">
+                          {a.target}
+                          <em>
+                            {a.place}. {a.outcome}.
+                          </em>
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                  <p className="label">What the oracle read</p>
+                  <ul className="works">
+                    {WORKS.map((w) => (
+                      <li key={w.title}>
+                        <strong>{w.title}</strong> <span>({w.year})</span> {w.note}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="label">Themes it weighs, by manifesto section</p>
+                  <ul className="themes">
+                    {THEMES.map((t) => (
+                      <li key={t.section}>
+                        <strong>{t.section}</strong> {t.gist}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="fine">
+                    Kaczynski was arrested at his Montana cabin in April 1996, after his brother David recognized the manifesto&apos;s writing and went to the FBI. He died in federal custody in 2023.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="eyebrow">About</p>
+                  <h2>How the Ted test works</h2>
+                  <p className="lede">
+                    Ten questions place you against the pattern of people Ted Kaczynski targeted between {TOLL.span}, and against the ideas in his published writing.
+                  </p>
+                  <ol className="steps">
+                    <li>
+                      <strong>Profile.</strong> His targets were specialists in computing, engineering, genetics, behavioral science, advertising and extractive industry. Your strongest match to those fields counts most.
+                    </li>
+                    <li>
+                      <strong>Reach.</strong> Every target had a findable name and address. Public visibility and institutional ties raise the score.
+                    </li>
+                    <li>
+                      <strong>Autonomy.</strong> Self-sufficiency, the manifesto&apos;s own ideal, lowers it by up to 85%.
+                    </li>
+                    <li>
+                      <strong>Contempt.</strong> Shown on your result, never added to it. His writing scorns far more people than he ever attacked.
+                    </li>
+                  </ol>
+                  <p className="fine">
+                    The score always comes from the fixed model. When an AI writes your reading, it works from the same summary of his writing and the public record, and it is instructed never to speak as him, praise the attacks, or describe methods. This piece covers real violence and real victims; the archive lists every one.
+                  </p>
+                </>
+              )}
+            </motion.div>
           </motion.aside>
         )}
       </AnimatePresence>

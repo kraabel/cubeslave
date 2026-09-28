@@ -22,6 +22,8 @@ class CabinAudio {
   // sound (it drives the master bus); voice is the spoken narration.
   private atmos = 0.8;
   private voice = 0.8;
+  // One switch over both channels, for the header's sound button.
+  private allMuted = false;
 
   get started() {
     return this.n !== null;
@@ -37,7 +39,7 @@ class CabinAudio {
 
     const master = ctx.createGain();
     master.gain.value = 0;
-    master.gain.linearRampToValueAtTime(busGain(this.atmos), ctx.currentTime + 4);
+    master.gain.linearRampToValueAtTime(this.allMuted ? 0 : busGain(this.atmos), ctx.currentTime + 4);
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 256;
     master.connect(analyser);
@@ -122,7 +124,17 @@ class CabinAudio {
     const { ctx, master } = this.n;
     master.gain.cancelScheduledValues(ctx.currentTime);
     master.gain.setValueAtTime(master.gain.value, ctx.currentTime);
-    master.gain.linearRampToValueAtTime(busGain(this.atmos), ctx.currentTime + 0.25);
+    master.gain.linearRampToValueAtTime(this.allMuted ? 0 : busGain(this.atmos), ctx.currentTime + 0.25);
+  }
+
+  setAllMuted(m: boolean) {
+    this.allMuted = m;
+    if (m) hush();
+    this.setAtmosphere(this.atmos);
+  }
+
+  isAllMuted() {
+    return this.allMuted;
   }
 
   setVoice(v: number) {
@@ -135,7 +147,7 @@ class CabinAudio {
   }
 
   voiceLevel() {
-    return this.voice;
+    return this.allMuted ? 0 : this.voice;
   }
 
   /** 0 = calm, 1 = full dread. */
@@ -164,6 +176,45 @@ class CabinAudio {
     g.gain.exponentialRampToValueAtTime(0.001, t + 0.035);
     src.connect(hp).connect(g).connect(master);
     src.start(t);
+  }
+
+  /** Pages in flight: an airy swell with paper crackle on top. */
+  rustle(intensity: number) {
+    if (!this.n || this.atmos === 0) return;
+    const { ctx, master, verb } = this.n;
+    const t = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = noise(ctx, 2.6);
+    const bp = ctx.createBiquadFilter();
+    bp.type = "bandpass";
+    bp.Q.value = 0.7;
+    bp.frequency.setValueAtTime(700, t);
+    bp.frequency.linearRampToValueAtTime(2400, t + 1.1);
+    bp.frequency.linearRampToValueAtTime(900, t + 2.5);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.22 * intensity, t + 0.9);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 2.6);
+    src.connect(bp).connect(g);
+    g.connect(master);
+    g.connect(verb);
+    src.start(t);
+
+    // Crackle: short bright ticks scattered through the swell.
+    const crackles = Math.round(18 * intensity);
+    for (let i = 0; i < crackles; i++) {
+      const at = t + 0.2 + Math.random() * 2;
+      const c = ctx.createBufferSource();
+      c.buffer = noise(ctx, 0.03);
+      const hp = ctx.createBiquadFilter();
+      hp.type = "highpass";
+      hp.frequency.value = 3000 + Math.random() * 3000;
+      const cg = ctx.createGain();
+      cg.gain.setValueAtTime(0.05 + Math.random() * 0.07, at);
+      cg.gain.exponentialRampToValueAtTime(0.0001, at + 0.03);
+      c.connect(hp).connect(cg).connect(master);
+      c.start(at);
+    }
   }
 
   /** Soft glassy tone for hover. */

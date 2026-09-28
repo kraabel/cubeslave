@@ -88,6 +88,38 @@ function VoiceIcon({ level }: { level: number }) {
   );
 }
 
+/** A live waveform that moves with whatever is playing. */
+function Waveform() {
+  const bars = useRef<(HTMLSpanElement | null)[]>([]);
+  useEffect(() => {
+    let raf = 0;
+    const tick = (now: number) => {
+      const level = audio.level();
+      bars.current.forEach((b, i) => {
+        if (!b) return;
+        const wobble = 0.5 + 0.5 * Math.sin(now / (180 + i * 37) + i * 1.9);
+        const h = 0.12 + Math.min(1, level * 4) * (0.35 + 0.65 * wobble) * (1 - Math.abs(i - 5) / 7);
+        b.style.transform = `scaleY(${h.toFixed(3)})`;
+      });
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  return (
+    <span className="waveform" aria-hidden>
+      {Array.from({ length: 11 }, (_, i) => (
+        <span
+          key={i}
+          ref={(el) => {
+            bars.current[i] = el;
+          }}
+        />
+      ))}
+    </span>
+  );
+}
+
 const CHANNELS: { id: Channel; label: string; Icon: typeof VoiceIcon }[] = [
   { id: "voice", label: "Voice", Icon: VoiceIcon },
   { id: "atmos", label: "Atmosphere", Icon: AtmosphereIcon },
@@ -122,6 +154,7 @@ export default function SoundDeck() {
 
   return (
     <div className="deck" role="group" aria-label="Sound">
+      <Waveform />
       {CHANNELS.map(({ id, label, Icon }) => {
         const v = levels[id];
         return (

@@ -1,4 +1,4 @@
-# The Cabin
+# The Ted test
 
 A full-screen 3D oracle. Ten questions, one verdict: how closely do you match the
 profile of the people Ted Kaczynski (the Unabomber) targeted?
@@ -32,7 +32,9 @@ always uses the offline narration.
 | Questions | `lib/questions.ts` | 10 questions. Each answer adds weight to one or more dimensions. |
 | Algorithm | `lib/algorithm.ts` | Scores 7 dimensions, then computes a 0-100 target-profile match (see below) and the nearest historical archetype by cosine similarity. |
 | Narration | `app/api/verdict/route.ts` | Re-scores server-side, then asks Claude to write the Archivist's reading, grounded in the corpus digest. Falls back to `lib/narrate.ts` offline. |
-| 3D scene | `components/Scene.tsx` | Night forest, lit cabin, falling ash, and the oracle: a distorted orb that breathes with the audio and shifts from cold blue to ember as you answer. |
+| 3D scene | `components/Scene.tsx` | Night forest, lit cabin, wet reflective ground, lanterns, drifting mist, embers, and depth of field. It also picks which shape the pages hold at each stage. |
+| Paper swarm | `components/PaperSwarm.tsx`, `lib/paperTexture.ts` | 520 procedurally drawn manuscript pages. They blow in, then spin between a ball, a paper bust, a tornado, a nest and a drift, with a red thread winding through. The homepage loops through the shapes; each answer re-forms them; the verdict shape follows your score. |
+| Buttons | `components/Organic.tsx` | Pill buttons with soft, wobbling edges drawn by animated SVG noise filters. |
 | Sound | `lib/audio.ts` | Fully synthesized: wind, a drone that tightens with each answer, typewriter keys, bells, and a sub-bass reveal. Spoken voice via browser speech synthesis. |
 | UI | `components/Experience.tsx` | Gate, intro, questions, divining, verdict, and memorial. Keys 1-5 answer questions. |
 

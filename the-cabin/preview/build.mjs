@@ -26,12 +26,12 @@ const result = await build({
 const js = result.outputFiles[0].text.replace(/<\/script/gi, "<\\/script");
 const css = readFileSync(path.join(root, "app/globals.css"), "utf8");
 
-const html = `<title>The Cabin</title>
+const html = `<title>The Ted Test</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=Special+Elite&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Urbanist:wght@300;400;500;600&display=swap">
 <style>
-:root { color-scheme: dark; --font-display: "Special Elite", "Courier New"; --font-ui: "Inter", system-ui; }
+:root { color-scheme: dark; --font-ui: "Urbanist"; }
 ${css}
 #root { height: 100%; }
 </style>

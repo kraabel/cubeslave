@@ -1,24 +1,21 @@
 "use client";
 
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Float, MeshDistortMaterial, Sparkles } from "@react-three/drei";
-import { Bloom, ChromaticAberration, EffectComposer, Noise, Vignette } from "@react-three/postprocessing";
+import { MeshReflectorMaterial } from "@react-three/drei";
+import { Bloom, DepthOfField, EffectComposer, Noise, Vignette } from "@react-three/postprocessing";
 import { BlendFunction } from "postprocessing";
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { audio } from "@/lib/audio";
+import PaperSwarm, { type Formation } from "./PaperSwarm";
 
 export type Stage = "gate" | "intro" | "question" | "divining" | "verdict";
 
 interface SceneProps {
   stage: Stage;
+  step: number; // question index
   progress: number; // 0..1 through the questions
   risk: number | null; // 0..100 once divined
 }
-
-const COLD = new THREE.Color("#8fb3d9");
-const EMBER = new THREE.Color("#ff5a1f");
-const MOSS = new THREE.Color("#7fd6a4");
 
 /** Seeded RNG so the forest is identical on every load. */
 function rng(seed: number) {
@@ -29,13 +26,6 @@ function rng(seed: number) {
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
-}
-
-function orbColor(stage: Stage, progress: number, risk: number | null, out: THREE.Color) {
-  if (stage === "verdict" && risk !== null) {
-    return risk < 15 ? out.copy(MOSS) : out.copy(COLD).lerp(EMBER, Math.min(1, risk / 85));
-  }
-  return out.copy(COLD).lerp(EMBER, stage === "divining" ? 0.55 : progress * 0.35);
 }
 
 function Forest() {
@@ -86,7 +76,7 @@ function Forest() {
         args={[undefined, undefined, count]}
       >
         <coneGeometry args={[1, 1, 6]} />
-        <meshStandardMaterial color="#0d1512" roughness={0.95} flatShading />
+        <meshStandardMaterial color="#101a1c" roughness={0.95} flatShading />
       </instancedMesh>
     </group>
   );
@@ -118,21 +108,21 @@ function Cabin() {
   );
 }
 
-function Ash() {
+/** Drifting motes: grey dust falling, or warm embers rising. */
+function Motes({ count, color, size, rise, opacity, seed }: { count: number; color: string; size: number; rise: boolean; opacity: number; seed: number }) {
   const points = useRef<THREE.Points>(null);
-  const count = 2200;
   const { positions, speeds } = useMemo(() => {
-    const r = rng(77);
+    const r = rng(seed);
     const positions = new Float32Array(count * 3);
     const speeds = new Float32Array(count);
     for (let i = 0; i < count; i++) {
-      positions[i * 3] = (r() - 0.5) * 60;
-      positions[i * 3 + 1] = r() * 22;
-      positions[i * 3 + 2] = (r() - 0.5) * 60 - 5;
+      positions[i * 3] = (r() - 0.5) * (rise ? 18 : 60);
+      positions[i * 3 + 1] = r() * 16;
+      positions[i * 3 + 2] = (r() - 0.5) * (rise ? 14 : 60) - (rise ? 1 : 5);
       speeds[i] = 0.15 + r() * 0.45;
     }
     return { positions, speeds };
-  }, []);
+  }, [count, rise, seed]);
 
   useFrame(({ clock }, dt) => {
     const geo = points.current?.geometry;
@@ -141,9 +131,10 @@ function Ash() {
     const t = clock.elapsedTime;
     for (let i = 0; i < count; i++) {
       const k = i * 3;
-      arr[k + 1] -= speeds[i] * dt * 0.6;
-      arr[k] += Math.sin(t * 0.3 + i) * dt * 0.25;
-      if (arr[k + 1] < 0) arr[k + 1] = 22;
+      arr[k + 1] += (rise ? 1 : -0.6) * speeds[i] * dt;
+      arr[k] += Math.sin(t * 0.3 + i) * dt * (rise ? 0.35 : 0.25);
+      if (rise && arr[k + 1] > 12) arr[k + 1] = 0;
+      if (!rise && arr[k + 1] < 0) arr[k + 1] = 16;
     }
     geo.attributes.position.needsUpdate = true;
   });
@@ -153,96 +144,141 @@ function Ash() {
       <bufferGeometry>
         <bufferAttribute attach="attributes-position" args={[positions, 3]} />
       </bufferGeometry>
-      <pointsMaterial size={0.06} color="#c9c3b8" transparent opacity={0.55} sizeAttenuation depthWrite={false} />
+      <pointsMaterial
+        size={size}
+        color={color}
+        transparent
+        opacity={opacity}
+        sizeAttenuation
+        depthWrite={false}
+        blending={rise ? THREE.AdditiveBlending : THREE.NormalBlending}
+        toneMapped={!rise}
+      />
     </points>
   );
 }
 
-/** The genie: a breathing, distorted orb that listens to the audio. */
-function Oracle({ stage, progress, risk }: SceneProps) {
-  const shell = useRef<THREE.Mesh>(null);
-  const core = useRef<THREE.Mesh>(null);
-  const ringA = useRef<THREE.Mesh>(null);
-  const lattice = useRef<THREE.Mesh>(null);
-  const ringB = useRef<THREE.Mesh>(null);
-  const light = useRef<THREE.PointLight>(null);
-  const color = useMemo(() => new THREE.Color(), []);
-  const target = useMemo(() => new THREE.Color(), []);
-  const distortion = useRef(0.3);
+function softTexture() {
+  const c = document.createElement("canvas");
+  c.width = c.height = 128;
+  const g = c.getContext("2d")!;
+  const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  grad.addColorStop(0, "rgba(255,255,255,1)");
+  grad.addColorStop(0.4, "rgba(255,255,255,0.45)");
+  grad.addColorStop(1, "rgba(255,255,255,0)");
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(c);
+}
 
-  useFrame(({ clock }, dt) => {
-    const t = clock.elapsedTime;
-    const level = audio.level();
-    orbColor(stage, progress, risk, target);
-    color.lerp(target, Math.min(1, dt * 1.5));
-
-    const agitation = stage === "divining" ? 0.75 : stage === "verdict" ? 0.35 + (risk ?? 0) / 250 : 0.25 + progress * 0.25;
-    distortion.current += (agitation - distortion.current) * Math.min(1, dt * 2);
-
-    if (shell.current) {
-      const mat = shell.current.material as THREE.MeshStandardMaterial & { distort: number; speed: number };
-      mat.distort = distortion.current + level * 0.5;
-      mat.color.copy(color);
-      mat.emissive.copy(color);
-      mat.emissiveIntensity = 0.35 + level * 1.4;
-      const s = 1 + Math.sin(t * 0.9) * 0.03 + level * 0.25;
-      shell.current.scale.setScalar(s);
-    }
-    if (core.current) {
-      (core.current.material as THREE.MeshBasicMaterial).color.copy(color).multiplyScalar(2.2);
-      core.current.scale.setScalar(0.22 + level * 0.25 + Math.sin(t * 2.1) * 0.015);
-    }
-    const spin = stage === "divining" ? 2.4 : 0.35;
-    if (lattice.current) {
-      lattice.current.rotation.y -= dt * spin * 0.25;
-      lattice.current.rotation.x += dt * spin * 0.1;
-      (lattice.current.material as THREE.MeshBasicMaterial).color.copy(color);
-      lattice.current.scale.setScalar(1 + level * 0.4);
-    }
-    if (ringA.current) {
-      ringA.current.rotation.x += dt * spin * 0.6;
-      ringA.current.rotation.y += dt * spin * 0.3;
-      (ringA.current.material as THREE.MeshBasicMaterial).color.copy(color);
-    }
-    if (ringB.current) {
-      ringB.current.rotation.y -= dt * spin * 0.5;
-      ringB.current.rotation.z += dt * spin * 0.2;
-      (ringB.current.material as THREE.MeshBasicMaterial).color.copy(color);
-    }
-    if (light.current) {
-      light.current.color.copy(color);
-      light.current.intensity = 14 + level * 40;
-    }
+/** Low banks of mist that drift across the clearing, in layers for depth. */
+function Mist() {
+  const group = useRef<THREE.Group>(null);
+  const tex = useMemo(softTexture, []);
+  const banks = useMemo(() => {
+    const r = rng(42);
+    return Array.from({ length: 16 }, () => ({
+      x: (r() - 0.5) * 30,
+      y: 0.3 + r() * 1.6,
+      z: -2 - r() * 22,
+      s: 6 + r() * 9,
+      v: 0.1 + r() * 0.25,
+      o: 0.05 + r() * 0.08,
+    }));
+  }, []);
+  useFrame((_, dt) => {
+    group.current?.children.forEach((m, i) => {
+      m.position.x += banks[i].v * dt;
+      if (m.position.x > 18) m.position.x = -18;
+    });
   });
-
   return (
-    <Float speed={1.4} rotationIntensity={0.35} floatIntensity={1.1} floatingRange={[-0.25, 0.25]}>
-      <group position={[0, 2.4, 0]}>
-        <mesh ref={shell}>
-          <icosahedronGeometry args={[1, 24]} />
-          <MeshDistortMaterial color={COLD} emissive={COLD} roughness={0.1} metalness={0.6} transparent opacity={0.22} depthWrite={false} distort={0.3} speed={1.6} />
+    <group ref={group}>
+      {banks.map((b, i) => (
+        <mesh key={i} position={[b.x, b.y, b.z]} scale={[b.s * 1.8, b.s * 0.45, 1]}>
+          <planeGeometry />
+          <meshBasicMaterial map={tex} color="#9fb0b8" transparent opacity={b.o} depthWrite={false} fog={false} />
         </mesh>
-        <mesh ref={lattice}>
-          <icosahedronGeometry args={[1.12, 2]} />
-          <meshBasicMaterial wireframe transparent opacity={0.12} toneMapped={false} />
-        </mesh>
-        <mesh ref={core}>
-          <sphereGeometry args={[1, 32, 32]} />
-          <meshBasicMaterial toneMapped={false} />
-        </mesh>
-        <mesh ref={ringA}>
-          <torusGeometry args={[1.65, 0.008, 8, 160]} />
-          <meshBasicMaterial toneMapped={false} transparent opacity={0.7} />
-        </mesh>
-        <mesh ref={ringB} rotation={[1.1, 0, 0.4]}>
-          <torusGeometry args={[2.05, 0.005, 8, 160]} />
-          <meshBasicMaterial toneMapped={false} transparent opacity={0.45} />
-        </mesh>
-        <pointLight ref={light} distance={16} decay={1.8} />
-        <Sparkles count={60} scale={4.5} size={2.2} speed={0.35} opacity={0.6} color="#e8dccb" />
-      </group>
-    </Float>
+      ))}
+    </group>
   );
+}
+
+/** Lanterns set along the clearing; their light pools on the wet ground. */
+function Lanterns() {
+  const lights = useRef<(THREE.PointLight | null)[]>([]);
+  const spots: [number, number, number][] = [
+    [-5.5, 0.35, -3],
+    [5.8, 0.35, -5],
+    [-3.2, 0.35, -11],
+    [8.5, 0.35, -13],
+  ];
+  const glow = useMemo(softTexture, []);
+  useFrame(({ clock }) => {
+    const t = clock.elapsedTime;
+    lights.current.forEach((l, i) => {
+      if (l) l.intensity = 3.2 + Math.sin(t * (5 + i) + i) * 0.35 + Math.sin(t * 11.3 + i * 2) * 0.2;
+    });
+  });
+  return (
+    <group>
+      {spots.map((p, i) => (
+        <group key={i} position={p}>
+          <mesh>
+            <boxGeometry args={[0.16, 0.26, 0.16]} />
+            <meshBasicMaterial color="#ffb45e" toneMapped={false} />
+          </mesh>
+          <sprite scale={[1.6, 1.6, 1]}>
+            <spriteMaterial map={glow} color="#ff9f45" transparent opacity={0.55} depthWrite={false} blending={THREE.AdditiveBlending} />
+          </sprite>
+          <pointLight
+            ref={(l) => {
+              lights.current[i] = l;
+            }}
+            color="#ff9a3c"
+            distance={7}
+            decay={1.7}
+          />
+        </group>
+      ))}
+    </group>
+  );
+}
+
+/** The homepage loop: pages blow in, then spin from shape to shape. */
+const HOME_LOOP: { f: Formation; hold: number }[] = [
+  { f: "sphere", hold: 7 },
+  { f: "bust", hold: 8 },
+  { f: "vortex", hold: 6.5 },
+  { f: "nest", hold: 6.5 },
+];
+const QUESTION_SHAPES: Formation[] = ["vortex", "bust", "nest", "sphere"];
+
+function useFormation({ stage, step, risk }: SceneProps): Formation {
+  const [loop, setLoop] = useState(-1);
+  useEffect(() => {
+    if (stage !== "gate") return;
+    let i = loop;
+    let timer: ReturnType<typeof setTimeout>;
+    const next = () => {
+      i = (i + 1) % HOME_LOOP.length;
+      setLoop(i);
+      timer = setTimeout(next, HOME_LOOP[i].hold * 1000);
+    };
+    timer = setTimeout(next, loop < 0 ? 600 : HOME_LOOP[Math.max(0, i)].hold * 1000);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage]);
+
+  if (stage === "gate") return loop < 0 ? "inflow" : HOME_LOOP[loop].f;
+  if (stage === "intro") return "sphere";
+  if (stage === "question") return QUESTION_SHAPES[step % QUESTION_SHAPES.length];
+  if (stage === "divining") return "vortex";
+  if (risk === null) return "sphere";
+  if (risk >= 60) return "sphere";
+  if (risk >= 35) return "bust";
+  if (risk >= 15) return "nest";
+  return "drift";
 }
 
 /**
@@ -253,24 +289,24 @@ function Oracle({ stage, progress, risk }: SceneProps) {
 type Shot = { pos: [number, number, number]; look: [number, number, number] };
 const SHOTS: Record<Stage, { wide: Shot; tall: Shot }> = {
   gate: {
-    wide: { pos: [0, 3.2, 17], look: [0, 3, 0] },
-    tall: { pos: [0, 3.2, 22], look: [0, 3, 0] },
+    wide: { pos: [0.6, 2.8, 10.5], look: [-3.1, 2.3, 0] },
+    tall: { pos: [0, 2.8, 18], look: [0, -1.5, 0] },
   },
   intro: {
-    wide: { pos: [0, 2.8, 11], look: [0, -0.2, 0] },
-    tall: { pos: [0, 2.8, 15], look: [0, 0.2, 0] },
+    wide: { pos: [0, 2.8, 11], look: [0, 0.4, 0] },
+    tall: { pos: [0, 2.8, 14], look: [0, -0.4, 0] },
   },
   question: {
-    wide: { pos: [0.6, 2.6, 9], look: [-2.9, 2.3, 0] },
-    tall: { pos: [0, 2.6, 13], look: [0, -1.4, 0] },
+    wide: { pos: [0.6, 2.7, 9.5], look: [-3.1, 2.3, 0] },
+    tall: { pos: [0, 2.7, 13.5], look: [0, -1.4, 0] },
   },
   divining: {
-    wide: { pos: [0, 2.5, 6.5], look: [0, 1.6, 0] },
-    tall: { pos: [0, 2.5, 9], look: [0, 1.2, 0] },
+    wide: { pos: [0, 2.6, 8], look: [0, 1.4, 0] },
+    tall: { pos: [0, 2.6, 11], look: [0, 0.6, 0] },
   },
   verdict: {
-    wide: { pos: [0, 2.4, 11], look: [0, 0.2, 0] },
-    tall: { pos: [0, 2.4, 15], look: [0, -1.8, 0] },
+    wide: { pos: [0.6, 2.7, 10], look: [-3.1, 2.3, 0] },
+    tall: { pos: [0, 2.7, 14], look: [0, -1.6, 0] },
   },
 };
 
@@ -283,7 +319,7 @@ function CameraRig({ stage, progress }: { stage: Stage; progress: number }) {
   useFrame(({ clock }, dt) => {
     const t = clock.elapsedTime;
     const shot = size.width / size.height < 0.9 ? SHOTS[stage].tall : SHOTS[stage].wide;
-    const push = stage === "question" ? progress * 1.6 : 0;
+    const push = stage === "question" ? progress * 1.2 : 0;
     pos.set(
       shot.pos[0] + Math.sin(t * 0.11) * 0.9 + pointer.x * 1.1,
       shot.pos[1] + Math.sin(t * 0.17) * 0.25 + pointer.y * 0.5,
@@ -299,35 +335,61 @@ function CameraRig({ stage, progress }: { stage: Stage; progress: number }) {
 }
 
 export default function Scene(props: SceneProps) {
+  const formation = useFormation(props);
+  const { stage, risk } = props;
+  const high = stage === "verdict" && (risk ?? 0) >= 60;
   return (
     <Canvas
       className="scene"
       dpr={[1, 1.75]}
-      camera={{ fov: 42, position: [0, 3.2, 17], near: 0.1, far: 200 }}
+      camera={{ fov: 42, position: [0.6, 3, 16], near: 0.1, far: 200 }}
       gl={{ antialias: false, powerPreference: "high-performance" }}
     >
-      <color attach="background" args={["#050607"]} />
-      <fogExp2 attach="fog" args={["#07090b", 0.045]} />
-      <ambientLight intensity={0.12} color="#9fb4c8" />
-      <directionalLight position={[-12, 20, -20]} intensity={0.35} color="#9fb4d6" />
+      <color attach="background" args={["#070a0c"]} />
+      <fogExp2 attach="fog" args={["#0b1114", 0.042]} />
+      <ambientLight intensity={0.16} color="#a9bcc8" />
+      <directionalLight position={[-12, 20, -20]} intensity={0.4} color="#9fb4d6" />
+      {/* Warm key from the viewer's side so page faces show their text. */}
+      <directionalLight position={[6, 6, 12]} intensity={1.5} color="#ffe6c2" />
       <mesh position={[-22, 26, -80]}>
         <sphereGeometry args={[3.2, 32, 32]} />
         <meshBasicMaterial color="#d9dccf" toneMapped={false} fog={false} />
       </mesh>
       <mesh rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[240, 240]} />
-        <meshStandardMaterial color="#080a09" roughness={1} />
+        <MeshReflectorMaterial
+          blur={[300, 80]}
+          resolution={512}
+          mixBlur={1}
+          mixStrength={22}
+          roughness={0.9}
+          depthScale={1.1}
+          minDepthThreshold={0.4}
+          maxDepthThreshold={1.4}
+          color="#0c0f10"
+          metalness={0.55}
+          mirror={0.6}
+        />
       </mesh>
       <Forest />
       <Cabin />
-      <Ash />
-      <Oracle {...props} />
-      <CameraRig stage={props.stage} progress={props.progress} />
+      <Lanterns />
+      <Mist />
+      <Motes count={900} color="#b9b4aa" size={0.05} rise={false} opacity={0.4} seed={77} />
+      <Motes count={260} color="#ffae5c" size={0.09} rise opacity={0.9} seed={12} />
+      <PaperSwarm
+        formation={formation}
+        spin={stage === "divining" ? 1.3 : stage === "verdict" ? 0.08 : 0.16}
+        tight={high ? 1 : 0}
+        thread={high ? 1 : stage === "verdict" && formation === "drift" ? 0 : 0.75}
+        heat={stage === "verdict" ? Math.min(1, (risk ?? 0) / 80) : stage === "divining" ? 0.8 : 0.45}
+      />
+      <CameraRig stage={stage} progress={props.progress} />
       <EffectComposer multisampling={0}>
-        <Bloom mipmapBlur intensity={1.25} luminanceThreshold={0.25} luminanceSmoothing={0.3} />
-        <ChromaticAberration offset={new THREE.Vector2(0.0006, 0.0004)} radialModulation={false} modulationOffset={0} blendFunction={BlendFunction.NORMAL} />
-        <Noise opacity={0.07} premultiply blendFunction={BlendFunction.ADD} />
-        <Vignette offset={0.25} darkness={0.85} />
+        <DepthOfField target={[0, 2.5, 0]} focalLength={0.09} bokehScale={2.2} height={480} />
+        <Bloom mipmapBlur intensity={1.1} luminanceThreshold={0.3} luminanceSmoothing={0.35} />
+        <Noise opacity={0.06} premultiply blendFunction={BlendFunction.ADD} />
+        <Vignette offset={0.25} darkness={0.8} />
       </EffectComposer>
     </Canvas>
   );
