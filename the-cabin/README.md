@@ -18,6 +18,12 @@ to `0.0.0.0:3000`. To turn on AI narration, add `ANTHROPIC_API_KEY` in Secrets.
 Without a key, the oracle uses its built-in offline narration and everything
 else still works.
 
+## Preview without a server
+
+`npm run preview:html` bundles the app into one self-contained file,
+`preview/the-cabin.html`, that opens in any browser. It has no API route, so it
+always uses the offline narration.
+
 ## How it works
 
 | Piece | File | What it does |
