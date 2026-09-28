@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { divine, type Result } from "@/lib/algorithm";
 import { audio, hush } from "@/lib/audio";
 import { ATTACKS, DIM_LABELS, THEMES, TOLL, WORKS, type Dim } from "@/lib/corpus";
+import { CHAPTERS, chapterOf, chapterStart } from "@/lib/chapters";
 import { clipUrl, GUIDE_BY_ID, GUIDES, tierKeyOf, type GuideId } from "@/lib/guides";
 import { offlineNarration, type Narration } from "@/lib/narrate";
 import { QUESTIONS } from "@/lib/questions";
@@ -81,6 +82,7 @@ export default function Experience() {
   const [overlay, setOverlay] = useState<Overlay>(null);
   const [guideId, setGuideId] = useState<GuideId>(GUIDES[0].id);
   const [previewing, setPreviewing] = useState<GuideId | null>(null);
+  const [chapterIdx, setChapterIdx] = useState(0);
   const guide = GUIDE_BY_ID[guideId];
   const INTRO = guide.intro;
   const [reasoning, setReasoning] = useState(false);
@@ -126,9 +128,20 @@ export default function Experience() {
     setTimeout(() => audio.playVoice(clipUrl(id, "intro")), 700);
   };
 
-  const startQuestions = () => {
+  const enterChapter = (c: number) => {
     hush();
+    setChapterIdx(c);
+    setStage("chapter");
+    setTimeout(() => audio.playVoice(clipUrl(guideId, `chapter-${CHAPTERS[c].id}`)), 900);
+  };
+
+  const startQuestions = () => {
     audio.select();
+    enterChapter(0);
+  };
+
+  const beginChapter = () => {
+    hush();
     setStage("question");
   };
 
@@ -142,11 +155,18 @@ export default function Experience() {
       window.setTimeout(() => {
         setAnswers(next);
         setPicked(null);
-        if (next.length >= QUESTIONS.length) setStage("divining");
-        else setQi(next.length);
+        if (next.length >= QUESTIONS.length) {
+          setStage("divining");
+          return;
+        }
+        setQi(next.length);
+        // Crossing into a new part: pause for the guide's introduction.
+        const c = chapterOf(next.length);
+        if (next.length === chapterStart(c)) enterChapter(c);
       }, 650);
     },
-    [answers, picked],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [answers, picked, guideId],
   );
 
   const goBack = () => {
@@ -273,6 +293,14 @@ export default function Experience() {
     <main className="stage" data-stage={stage}>
       <OrganicDefs />
       <Scene stage={stage} step={qi} progress={progress} risk={result?.risk ?? null} />
+      <div className="film" aria-hidden>
+        <span className="grain" />
+        <span className="flicker" />
+        <span className="dust" />
+        <span className="scratch" />
+        <span className="letterbox top" />
+        <span className="letterbox bottom" />
+      </div>
 
       <header className="topbar">
         <button className="brand" onClick={home} aria-label="The Ted test, home">
@@ -394,6 +422,46 @@ export default function Experience() {
           </motion.section>
         )}
 
+        {stage === "chapter" && (
+          <motion.section key={`chapter-${chapterIdx}`} className="panel chapter" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, y: -24, filter: "blur(10px)" }} transition={{ duration: 1 }}>
+            <motion.p className="eyebrow" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2, duration: 0.8 }}>
+              Part {CHAPTERS[chapterIdx].numeral} of {CHAPTERS[CHAPTERS.length - 1].numeral}
+              <span className="chapter-count">
+                {CHAPTERS[chapterIdx].questions.length} questions
+              </span>
+            </motion.p>
+            <h2>
+              <motion.span className="numeral-big" initial={{ opacity: 0, scale: 0.9, filter: "blur(10px)" }} animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }} transition={{ delay: 0.3, duration: 1.4, ease }}>
+                {CHAPTERS[chapterIdx].numeral}
+              </motion.span>
+              <motion.span initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5, duration: 1.2, ease }}>
+                {CHAPTERS[chapterIdx].title}
+              </motion.span>
+            </h2>
+            <motion.p className="lede" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1, duration: 1 }}>
+              {CHAPTERS[chapterIdx].theme}
+            </motion.p>
+            <motion.blockquote className="guide-says" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 1.2, duration: 0.9 }}>
+              <GuideGlyph kind={guide.glyph} speaking />
+              <div>
+                <p className="label">{guide.name}</p>
+                <p className="quote">
+                  <Typewriter text={guide.chapters[CHAPTERS[chapterIdx].id]} speed={34} delay={1400} sound={false} />
+                </p>
+              </div>
+            </motion.blockquote>
+            <motion.p className="record-fact" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1.8, duration: 1 }}>
+              <span>From the record</span>
+              {CHAPTERS[chapterIdx].fact}
+            </motion.p>
+            <motion.div className="actions" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 2.2, duration: 0.9 }}>
+              <Blob variant="primary" onClick={beginChapter}>
+                {chapterIdx === CHAPTERS.length - 1 ? "Final questions" : `Begin part ${CHAPTERS[chapterIdx].numeral}`} <Arrow />
+              </Blob>
+            </motion.div>
+          </motion.section>
+        )}
+
         {stage === "question" && (
           <motion.section
             key={`q-${qi}`}
@@ -405,11 +473,19 @@ export default function Experience() {
             transition={{ duration: 0.8, ease }}
           >
             <div className="dots" aria-hidden>
-              {QUESTIONS.map((_, i) => (
-                <span key={i} data-state={i < answers.length ? "done" : i === qi ? "now" : "todo"} />
+              {CHAPTERS.map((ch, c) => (
+                <span className="dot-group" key={ch.id} data-current={c === chapterOf(qi)}>
+                  {ch.questions.map((_, k) => {
+                    const i = chapterStart(c) + k;
+                    return <span key={i} className="dot" data-state={i < answers.length ? "done" : i === qi ? "now" : "todo"} />;
+                  })}
+                </span>
               ))}
             </div>
             <p className="count">
+              <span className="part">
+                Part {CHAPTERS[chapterOf(qi)].numeral} · {CHAPTERS[chapterOf(qi)].title}
+              </span>
               {pad(qi + 1)} / {QUESTIONS.length}
             </p>
             <h2>{q.prompt}</h2>
@@ -424,7 +500,7 @@ export default function Experience() {
                   animate={{ opacity: picked === null || picked === i ? 1 : 0.2, y: 0, filter: "blur(0px)" }}
                   transition={{ delay: picked === null ? 0.35 + i * 0.09 : 0, duration: 0.7, ease }}
                 >
-                  <Blob variant="glass" active={picked === i} onClick={() => choose(i)} onMouseEnter={() => audio.hover()} aria-keyshortcuts={String(i + 1)}>
+                  <Blob variant="glass" active={picked === i} onClick={() => choose(i)} aria-keyshortcuts={String(i + 1)}>
                     {o.label}
                   </Blob>
                 </motion.li>

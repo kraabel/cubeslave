@@ -2,13 +2,15 @@
 
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { MeshReflectorMaterial } from "@react-three/drei";
-import { Bloom, DepthOfField, EffectComposer, Noise, Vignette } from "@react-three/postprocessing";
+import { Bloom, BrightnessContrast, ChromaticAberration, DepthOfField, EffectComposer, HueSaturation, Noise, Vignette } from "@react-three/postprocessing";
 import { BlendFunction } from "postprocessing";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
+import Fireflies from "./Fireflies";
+import { Moon, Mountains, Sky, Snow, Stars } from "./Landscape";
 import PaperSwarm, { type Formation } from "./PaperSwarm";
 
-export type Stage = "gate" | "guide" | "intro" | "question" | "divining" | "verdict";
+export type Stage = "gate" | "guide" | "intro" | "chapter" | "question" | "divining" | "verdict";
 
 interface SceneProps {
   stage: Stage;
@@ -39,11 +41,13 @@ function Forest() {
       const dist = 9 + Math.pow(r(), 0.7) * 42;
       const x = Math.cos(angle) * dist;
       const z = Math.sin(angle) * dist - 6;
-      const h = 5 + r() * 9;
+      const h = 4 + r() * 7;
       const w = 0.9 + r() * 1.3;
       const tilt = (r() - 0.5) * 0.06;
-      // Keep a clearing along the camera's path so no trunk fills the lens.
+      // Keep a clearing along the camera's path so no trunk fills the lens,
+      // and a valley behind it so the ranges show through.
       if (Math.abs(x) < 7 + w && z > -12) continue;
+      if (Math.abs(x) < 20 + (-z - 12) * 0.35 && z <= -12 && r() < 0.85) continue;
       out.push({ x, z, h, w, tilt });
     }
     return out;
@@ -76,7 +80,7 @@ function Forest() {
         args={[undefined, undefined, count]}
       >
         <coneGeometry args={[1, 1, 6]} />
-        <meshStandardMaterial color="#101a1c" roughness={0.95} flatShading />
+        <meshStandardMaterial color="#0a1114" roughness={0.95} flatShading />
       </instancedMesh>
     </group>
   );
@@ -105,56 +109,6 @@ function Cabin() {
       </mesh>
       <pointLight ref={lamp} position={[0.6, 1.3, 2]} color="#ff9a3c" distance={9} decay={1.6} />
     </group>
-  );
-}
-
-/** Drifting motes: grey dust falling, or warm embers rising. */
-function Motes({ count, color, size, rise, opacity, seed }: { count: number; color: string; size: number; rise: boolean; opacity: number; seed: number }) {
-  const points = useRef<THREE.Points>(null);
-  const { positions, speeds } = useMemo(() => {
-    const r = rng(seed);
-    const positions = new Float32Array(count * 3);
-    const speeds = new Float32Array(count);
-    for (let i = 0; i < count; i++) {
-      positions[i * 3] = (r() - 0.5) * (rise ? 18 : 60);
-      positions[i * 3 + 1] = r() * 16;
-      positions[i * 3 + 2] = (r() - 0.5) * (rise ? 14 : 60) - (rise ? 1 : 5);
-      speeds[i] = 0.15 + r() * 0.45;
-    }
-    return { positions, speeds };
-  }, [count, rise, seed]);
-
-  useFrame(({ clock }, dt) => {
-    const geo = points.current?.geometry;
-    if (!geo) return;
-    const arr = geo.attributes.position.array as Float32Array;
-    const t = clock.elapsedTime;
-    for (let i = 0; i < count; i++) {
-      const k = i * 3;
-      arr[k + 1] += (rise ? 1 : -0.6) * speeds[i] * dt;
-      arr[k] += Math.sin(t * 0.3 + i) * dt * (rise ? 0.35 : 0.25);
-      if (rise && arr[k + 1] > 12) arr[k + 1] = 0;
-      if (!rise && arr[k + 1] < 0) arr[k + 1] = 16;
-    }
-    geo.attributes.position.needsUpdate = true;
-  });
-
-  return (
-    <points ref={points}>
-      <bufferGeometry>
-        <bufferAttribute attach="attributes-position" args={[positions, 3]} />
-      </bufferGeometry>
-      <pointsMaterial
-        size={size}
-        color={color}
-        transparent
-        opacity={opacity}
-        sizeAttenuation
-        depthWrite={false}
-        blending={rise ? THREE.AdditiveBlending : THREE.NormalBlending}
-        toneMapped={!rise}
-      />
-    </points>
   );
 }
 
@@ -197,7 +151,7 @@ function Mist() {
       {banks.map((b, i) => (
         <mesh key={i} position={[b.x, b.y, b.z]} scale={[b.s * 1.8, b.s * 0.45, 1]}>
           <planeGeometry />
-          <meshBasicMaterial map={tex} color="#9fb0b8" transparent opacity={b.o} depthWrite={false} fog={false} />
+          <meshBasicMaterial map={tex} color="#8aa0b2" transparent opacity={b.o} depthWrite={false} fog={false} />
         </mesh>
       ))}
     </group>
@@ -207,17 +161,16 @@ function Mist() {
 /** Lanterns set along the clearing; their light pools on the wet ground. */
 function Lanterns() {
   const lights = useRef<(THREE.PointLight | null)[]>([]);
+  // Very little light out here: two lanterns, far apart.
   const spots: [number, number, number][] = [
     [-5.5, 0.35, -3],
-    [5.8, 0.35, -5],
-    [-3.2, 0.35, -11],
     [8.5, 0.35, -13],
   ];
   const glow = useMemo(softTexture, []);
   useFrame(({ clock }) => {
     const t = clock.elapsedTime;
     lights.current.forEach((l, i) => {
-      if (l) l.intensity = 3.2 + Math.sin(t * (5 + i) + i) * 0.35 + Math.sin(t * 11.3 + i * 2) * 0.2;
+      if (l) l.intensity = 1.9 + Math.sin(t * (5 + i) + i) * 0.25 + Math.sin(t * 11.3 + i * 2) * 0.15;
     });
   });
   return (
@@ -229,7 +182,7 @@ function Lanterns() {
             <meshBasicMaterial color="#ffb45e" toneMapped={false} />
           </mesh>
           <sprite scale={[1.6, 1.6, 1]}>
-            <spriteMaterial map={glow} color="#ff9f45" transparent opacity={0.55} depthWrite={false} blending={THREE.AdditiveBlending} />
+            <spriteMaterial map={glow} color="#ff9f45" transparent opacity={0.4} depthWrite={false} blending={THREE.AdditiveBlending} />
           </sprite>
           <pointLight
             ref={(l) => {
@@ -273,6 +226,7 @@ function useFormation({ stage, step, risk }: SceneProps): Formation {
   if (stage === "gate") return loop < 0 ? "inflow" : HOME_LOOP[loop].f;
   if (stage === "guide") return "nest";
   if (stage === "intro") return "sphere";
+  if (stage === "chapter") return "bust";
   if (stage === "question") return QUESTION_SHAPES[step % QUESTION_SHAPES.length];
   if (stage === "divining") return "vortex";
   if (risk === null) return "sphere";
@@ -300,6 +254,10 @@ const SHOTS: Record<Stage, { wide: Shot; tall: Shot }> = {
   intro: {
     wide: { pos: [0, 2.8, 11], look: [0, 0.4, 0] },
     tall: { pos: [0, 2.8, 14], look: [0, -0.4, 0] },
+  },
+  chapter: {
+    wide: { pos: [0.4, 2.9, 10.5], look: [-3.1, 2.4, 0] },
+    tall: { pos: [0, 2.8, 15], look: [0, -1.6, 0] },
   },
   question: {
     wide: { pos: [0.6, 2.7, 9.5], look: [-3.1, 2.3, 0] },
@@ -350,16 +308,17 @@ export default function Scene(props: SceneProps) {
       camera={{ fov: 42, position: [0.6, 3, 16], near: 0.1, far: 200 }}
       gl={{ antialias: false, powerPreference: "high-performance" }}
     >
-      <color attach="background" args={["#070a0c"]} />
-      <fogExp2 attach="fog" args={["#0b1114", 0.042]} />
-      <ambientLight intensity={0.16} color="#a9bcc8" />
-      <directionalLight position={[-12, 20, -20]} intensity={0.4} color="#9fb4d6" />
-      {/* Warm key from the viewer's side so page faces show their text. */}
-      <directionalLight position={[6, 6, 12]} intensity={1.5} color="#ffe6c2" />
-      <mesh position={[-22, 26, -80]}>
-        <sphereGeometry args={[3.2, 32, 32]} />
-        <meshBasicMaterial color="#d9dccf" toneMapped={false} fog={false} />
-      </mesh>
+      <color attach="background" args={["#03060a"]} />
+      <fogExp2 attach="fog" args={["#0a131a", 0.036]} />
+      <Sky />
+      <Stars />
+      <Moon />
+      <Mountains />
+      <ambientLight intensity={0.1} color="#7f98b3" />
+      {/* Cold moonlight from the moon's direction. */}
+      <directionalLight position={[-35, 42, -84]} intensity={0.45} color="#9db4d4" />
+      {/* A low warm key from the viewer's side so page faces show their text. */}
+      <directionalLight position={[6, 6, 12]} intensity={1.1} color="#ffe6c2" />
       <mesh rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[240, 240]} />
         <MeshReflectorMaterial
@@ -371,17 +330,17 @@ export default function Scene(props: SceneProps) {
           depthScale={1.1}
           minDepthThreshold={0.4}
           maxDepthThreshold={1.4}
-          color="#0c0f10"
-          metalness={0.55}
-          mirror={0.6}
+          color="#090d10"
+          metalness={0.5}
+          mirror={0.45}
         />
       </mesh>
       <Forest />
       <Cabin />
       <Lanterns />
       <Mist />
-      <Motes count={900} color="#b9b4aa" size={0.05} rise={false} opacity={0.4} seed={77} />
-      <Motes count={260} color="#ffae5c" size={0.09} rise opacity={0.9} seed={12} />
+      <Snow />
+      <Fireflies />
       <PaperSwarm
         formation={formation}
         spin={stage === "divining" ? 1.3 : stage === "verdict" ? 0.08 : 0.16}
@@ -391,10 +350,14 @@ export default function Scene(props: SceneProps) {
       />
       <CameraRig stage={stage} progress={props.progress} />
       <EffectComposer multisampling={0}>
-        <DepthOfField target={[0, 2.5, 0]} focalLength={0.09} bokehScale={2.2} height={480} />
-        <Bloom mipmapBlur intensity={1.1} luminanceThreshold={0.3} luminanceSmoothing={0.35} />
-        <Noise opacity={0.06} premultiply blendFunction={BlendFunction.ADD} />
-        <Vignette offset={0.25} darkness={0.8} />
+        <DepthOfField target={[0, 2.5, 0]} focalLength={0.09} bokehScale={2.4} height={480} />
+        <Bloom mipmapBlur intensity={1.15} luminanceThreshold={0.28} luminanceSmoothing={0.35} />
+        {/* Grade: slightly desaturated and contrasty, like cold night stock. */}
+        <HueSaturation saturation={-0.14} />
+        <BrightnessContrast brightness={-0.02} contrast={0.12} />
+        <ChromaticAberration offset={new THREE.Vector2(0.0009, 0.0006)} radialModulation modulationOffset={0.35} />
+        <Noise opacity={0.09} premultiply blendFunction={BlendFunction.ADD} />
+        <Vignette offset={0.2} darkness={0.92} />
       </EffectComposer>
     </Canvas>
   );

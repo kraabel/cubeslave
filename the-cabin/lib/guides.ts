@@ -8,6 +8,8 @@
  * scripts/render-voices.mjs. Change a line and re-render it.
  */
 
+import type { ChapterId } from "./chapters";
+
 export type GuideId = "marr" | "cole" | "wren" | "lorne";
 
 export type TierKey = "package" | "list" | "notebook" | "crowd" | "woods" | "unnoticed";
@@ -35,6 +37,8 @@ export interface Guide {
   greeting: string;
   intro: string[];
   divining: string;
+  /** Spoken at the start of each part of the quiz. */
+  chapters: Record<ChapterId, string>;
   /** What the guide says first on the result screen, one line per verdict tier. */
   openers: Record<TierKey, string>;
 }
@@ -60,6 +64,11 @@ export const GUIDES: Guide[] = [
       "Answer ten questions, and I'll tell you whether his reasons would have included you.",
     ],
     divining: "Give me a moment… I'm reading your answers against his.",
+    chapters: {
+      work: "We start with your work. He never chose people for who they were, only for what they did. Grievance needs a face, and he found his faces in job titles.",
+      machine: "Four answers in, and a picture is forming. Now, the machine itself. He believed technology takes away our control over our own lives. The next questions measure how much control you've handed over.",
+      mind: "Last, your beliefs. Here's what most people miss: he despised far more people than he ever attacked. Contempt is loud. It isn't the same as intent.",
+    },
     openers: {
       package: "I've read his reasons and your answers side by side. They agree with each other.",
       list: "Your answers give his reasons something to hold on to.",
@@ -89,6 +98,11 @@ export const GUIDES: Guide[] = [
       "Answer ten questions. I'll tell you whether you'd have made his list.",
     ],
     divining: "All right. Let me lay your answers next to the case file…",
+    chapters: {
+      work: "First, your work. Every name on his list came from somewhere public: a faculty directory, a trade magazine, a newspaper. So I'll ask what you do, and how easy you are to find.",
+      machine: "That's the profile. Now the motive. He wrote that the system can't be reformed, only escaped. These next four tell me which side of that line you live on.",
+      mind: "Two more. These go to belief and instinct. In the file, his contempt covers half the country. His targets are a short list. Don't confuse the two.",
+    },
     openers: {
       package: "You fit the victim pool, and you'd have been easy to find.",
       list: "You match the pool on the markers that mattered. Findable, too.",
@@ -118,6 +132,11 @@ export const GUIDES: Guide[] = [
       "Answer ten questions, and I will tell you where you stand in his argument.",
     ],
     divining: "Patience… I am turning your answers over against his pages.",
+    chapters: {
+      work: "Let us begin with your labour. He believed the system turns work into a surrogate: goals invented for us, pursued for status. Tell me what yours is.",
+      machine: "You have told me what you do. Now, how you live. His central claim was that freedom and technology cannot share a house. Let us see which one you have let in.",
+      mind: "Two final questions, about conviction. The manifesto sneers at the left and the right alike. Scorn was his temperament. It was never, by itself, his method.",
+    },
     openers: {
       package: "In his argument you are not a bystander. You are the machine he meant to stop.",
       list: "In his argument you are one of the hands that keeps the machine running.",
@@ -147,6 +166,11 @@ export const GUIDES: Guide[] = [
       "Answer ten questions. I'll tell you whether he would have come for you.",
     ],
     divining: "Stay with me… I'm reading you the way he would have.",
+    chapters: {
+      work: "Start with your work. Isolated people build their enemies out of categories, not individuals. He hated professions. Let's see if yours was one.",
+      machine: "Good. Now the harder part. He lived for decades without electricity, and he believed it made him free. The next questions ask what you'd give up, and what you couldn't.",
+      mind: "Last two. This is where people get nervous, because it's about what you believe. He scorned nearly everyone. That's the isolation talking. It isn't the same as choosing you.",
+    },
     openers: {
       package: "His contempt had a shape, and you fit inside it.",
       list: "His contempt kept a list. You're on it.",
@@ -170,6 +194,9 @@ export function guideClips(g: Guide, tiers: { title: string }[]): Record<string,
     greeting: g.greeting,
     intro: g.intro.slice(0, -1).join(" ") + " [whispers] " + g.intro[g.intro.length - 1],
     divining: g.divining,
+    "chapter-work": g.chapters.work,
+    "chapter-machine": g.chapters.machine,
+    "chapter-mind": g.chapters.mind,
   };
   for (const t of tiers) {
     const k = tierKeyOf(t.title);

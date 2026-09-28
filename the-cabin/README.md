@@ -37,13 +37,18 @@ The guide changes how your result is read to you, never the score.
 | Professor Aldous Wren | Psychoanalyst and historian of ideas | Where you stand in the manifesto's argument | Eldrin |
 | Dr. Vera Lorne | Clinical psychologist, isolation and radicalization | Contempt, and whether scorn became a target | Ariana |
 
-Everything a guide says on a fixed script (greeting, intro, loading line, and a
-verdict line for each of the six tiers) is pre-rendered in `public/voices/`.
+The ten questions run in three parts (`lib/chapters.ts`): The work (4), The
+machine (4) and The mind (2). Each part opens with a card: a fact from the
+record and a short spoken introduction from the guide.
+
+Everything a guide says on a fixed script (greeting, intro, three part
+introductions, loading line, and a verdict line for each of the six tiers) is
+pre-rendered in `public/voices/`: 12 clips per guide, 48 in all.
 To change a line, edit `lib/guides.ts` and re-render it:
 
 ```bash
 ELEVENLABS_API_KEY=... npm run voices -- marr intro   # one clip
-ELEVENLABS_API_KEY=... npm run voices                 # all 36
+ELEVENLABS_API_KEY=... npm run voices                 # all 48
 ```
 
 With `ELEVENLABS_API_KEY` set on the server, the guide also reads your personal
@@ -58,7 +63,7 @@ stays on screen as text.
 | Questions | `lib/questions.ts` | 10 questions. Each answer adds weight to one or more dimensions. |
 | Algorithm | `lib/algorithm.ts` | Scores 7 dimensions, then computes a 0-100 target-profile match (see below) and the nearest historical archetype by cosine similarity. |
 | Narration | `app/api/verdict/route.ts` | Re-scores server-side, then asks Claude to write the Archivist's reading, grounded in the corpus digest. Falls back to `lib/narrate.ts` offline. |
-| 3D scene | `components/Scene.tsx` | Night forest, lit cabin, wet reflective ground, lanterns, drifting mist, embers, and depth of field. It also picks which shape the pages hold at each stage. |
+| 3D scene | `components/Scene.tsx`, `components/Landscape.tsx`, `components/Fireflies.tsx` | A cold Montana night: shader sky, twinkling stars, a thin moon, four receding ridgelines with moonlit snow, a pine valley, one lit cabin, two lanterns on wet ground, mist, light snow, and fireflies in three depth layers. Film grade, grain, flicker, dust and letterbox bars finish it. It also picks which shape the pages hold at each stage. |
 | Paper swarm | `components/PaperSwarm.tsx`, `lib/paperTexture.ts` | 520 procedurally drawn manuscript pages. They blow in, then spin between a ball, a paper bust, a tornado, a nest and a drift, with a red thread winding through. The homepage loops through the shapes; each answer re-forms them; the verdict shape follows your score. |
 | Buttons | `components/Organic.tsx` | Pill buttons with soft, wobbling edges drawn by animated SVG noise filters. |
 | Sound | `lib/audio.ts` | Fully synthesized: wind, a drone that tightens with each answer, typewriter keys, bells, and a sub-bass reveal. Spoken voice via browser speech synthesis. |

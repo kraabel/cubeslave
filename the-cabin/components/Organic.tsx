@@ -1,6 +1,7 @@
 "use client";
 
 import type { ButtonHTMLAttributes, ReactNode } from "react";
+import { audio } from "@/lib/audio";
 
 /**
  * Hand-drawn, living edges for buttons. Two SVG noise filters displace thin
@@ -41,9 +42,21 @@ interface BlobProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   children: ReactNode;
 }
 
-export function Blob({ variant = "glass", active = false, size = "md", className = "", children, ...rest }: BlobProps) {
+export function Blob({ variant = "glass", active = false, size = "md", className = "", children, onPointerEnter, onPointerDown, ...rest }: BlobProps) {
   return (
-    <button className={`blob blob-${variant} blob-${size} ${className}`} data-active={active} {...rest}>
+    <button
+      className={`blob blob-${variant} blob-${size} ${className}`}
+      data-active={active}
+      onPointerEnter={(e) => {
+        if (e.pointerType === "mouse") audio.uiHover(variant);
+        onPointerEnter?.(e);
+      }}
+      onPointerDown={(e) => {
+        audio.uiPress(variant);
+        onPointerDown?.(e);
+      }}
+      {...rest}
+    >
       <span className="blob-fill" aria-hidden />
       <span className="blob-edge edge-a" aria-hidden />
       <span className="blob-edge edge-b" aria-hidden />

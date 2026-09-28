@@ -12,6 +12,7 @@ export interface Question {
   options: Option[];
 }
 
+/** Ordered to match the three parts in lib/chapters.ts. */
 export const QUESTIONS: Question[] = [
   {
     id: "work",
@@ -37,6 +38,28 @@ export const QUESTIONS: Question[] = [
     ],
   },
   {
+    id: "persuade",
+    prompt: "Is it your job to change what people want?",
+    whisper: "Propaganda and psychological technique, he wrote, adapt people to the machine.",
+    options: [
+      { label: "Yes. Persuasion or behavior design is my craft", w: { manipulation: 3 } },
+      { label: "I shape minds as a teacher or researcher", w: { manipulation: 1, institution: 1 } },
+      { label: "No, but I'm easily persuaded", w: { contempt: 1 } },
+      { label: "No. I'm hard to sell anything", w: { autonomy: 1 } },
+    ],
+  },
+  {
+    id: "visible",
+    prompt: "How easy is your name to find?",
+    whisper: "One victim was chosen after his firm appeared in the news.",
+    options: [
+      { label: "Quoted in the press, cited in my field", w: { visibility: 3 } },
+      { label: "Published papers, conference talks", w: { visibility: 2, institution: 1 } },
+      { label: "A professional profile, like everyone", w: { visibility: 1 } },
+      { label: "Almost nobody knows who I am", w: { autonomy: 1 } },
+    ],
+  },
+  {
     id: "tech",
     prompt: "How do you live with technology?",
     whisper: "He lived without electricity or running water.",
@@ -59,39 +82,6 @@ export const QUESTIONS: Question[] = [
     ],
   },
   {
-    id: "nature",
-    prompt: "What is wild land for?",
-    whisper: "He called wild nature the positive ideal.",
-    options: [
-      { label: "Resources. Timber, energy, development", w: { system: 3 } },
-      { label: "Protecting it through policy and nonprofits", w: { contempt: 1, institution: 1 } },
-      { label: "A weekend hike, a good photo", w: { contempt: 1 } },
-      { label: "Living in it. Hunting, growing, staying", w: { autonomy: 3 } },
-    ],
-  },
-  {
-    id: "visible",
-    prompt: "How easy is your name to find?",
-    whisper: "One victim was chosen after his firm appeared in the news.",
-    options: [
-      { label: "Quoted in the press, cited in my field", w: { visibility: 3 } },
-      { label: "Published papers, conference talks", w: { visibility: 2, institution: 1 } },
-      { label: "A professional profile, like everyone", w: { visibility: 1 } },
-      { label: "Almost nobody knows who I am", w: { autonomy: 1 } },
-    ],
-  },
-  {
-    id: "persuade",
-    prompt: "Is it your job to change what people want?",
-    whisper: "Propaganda and psychological technique, he wrote, adapt people to the machine.",
-    options: [
-      { label: "Yes. Persuasion or behavior design is my craft", w: { manipulation: 3 } },
-      { label: "I shape minds as a teacher or researcher", w: { manipulation: 1, institution: 1 } },
-      { label: "No, but I'm easily persuaded", w: { contempt: 1 } },
-      { label: "No. I'm hard to sell anything", w: { autonomy: 1 } },
-    ],
-  },
-  {
     id: "power",
     prompt: "How do you meet your needs?",
     whisper: "“The power process”: real goals, real effort, your own hands.",
@@ -100,6 +90,17 @@ export const QUESTIONS: Question[] = [
       { label: "A salary from a large organization", w: { institution: 2 } },
       { label: "Investments, equity, status", w: { system: 2, contempt: 1 } },
       { label: "A mix. I patch it together", w: {} },
+    ],
+  },
+  {
+    id: "nature",
+    prompt: "What is wild land for?",
+    whisper: "He called wild nature the positive ideal.",
+    options: [
+      { label: "Resources. Timber, energy, development", w: { system: 3 } },
+      { label: "Protecting it through policy and nonprofits", w: { contempt: 1, institution: 1 } },
+      { label: "A weekend hike, a good photo", w: { contempt: 1 } },
+      { label: "Living in it. Hunting, growing, staying", w: { autonomy: 3 } },
     ],
   },
   {

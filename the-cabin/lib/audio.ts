@@ -292,6 +292,71 @@ class CabinAudio {
     }
   }
 
+  private lastUi = 0;
+
+  /**
+   * Button sounds. Hover is a soft breath of air with a glint on primary
+   * buttons; press is a warm low knock (primary), a paper tap (answers) or a
+   * dry tick (everything else). Throttled so sweeping across buttons stays
+   * quiet.
+   */
+  uiHover(kind: "primary" | "glass" | "outline" | "link") {
+    if (!this.n || this.atmos === 0) return;
+    const { ctx, master, verb } = this.n;
+    const t = ctx.currentTime;
+    if (t - this.lastUi < 0.06) return;
+    this.lastUi = t;
+    const src = ctx.createBufferSource();
+    src.buffer = noise(ctx, 0.25);
+    const bp = ctx.createBiquadFilter();
+    bp.type = "bandpass";
+    bp.frequency.setValueAtTime(kind === "glass" ? 1800 : 1200, t);
+    bp.frequency.exponentialRampToValueAtTime(kind === "glass" ? 3400 : 2200, t + 0.2);
+    bp.Q.value = 1.4;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(kind === "link" ? 0.02 : 0.045, t + 0.05);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.24);
+    src.connect(bp).connect(g).connect(master);
+    src.start(t);
+    if (kind === "primary" || kind === "glass") this.bell(kind === "primary" ? 1318.5 : 987.8, 0.012, 0.9);
+    void verb;
+  }
+
+  uiPress(kind: "primary" | "glass" | "outline" | "link") {
+    if (!this.n || this.atmos === 0) return;
+    const { ctx, master, verb } = this.n;
+    const t = ctx.currentTime;
+    if (kind === "primary") {
+      // A warm knock, like a hand on a wooden door.
+      const o = ctx.createOscillator();
+      o.type = "sine";
+      o.frequency.setValueAtTime(150, t);
+      o.frequency.exponentialRampToValueAtTime(62, t + 0.16);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.28, t + 0.008);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+      o.connect(g);
+      g.connect(master);
+      g.connect(verb);
+      o.start(t);
+      o.stop(t + 0.32);
+    }
+    // Every press gets a short tap on top: papery for answers, dry for the rest.
+    const src = ctx.createBufferSource();
+    src.buffer = noise(ctx, 0.08);
+    const f = ctx.createBiquadFilter();
+    f.type = kind === "glass" ? "bandpass" : "highpass";
+    f.frequency.value = kind === "glass" ? 2600 : kind === "primary" ? 1800 : 3200;
+    f.Q.value = 0.9;
+    const g2 = ctx.createGain();
+    g2.gain.setValueAtTime(kind === "link" ? 0.05 : 0.11, t);
+    g2.gain.exponentialRampToValueAtTime(0.0001, t + (kind === "glass" ? 0.07 : 0.035));
+    src.connect(f).connect(g2).connect(master);
+    src.start(t);
+  }
+
   /** Soft glassy tone for hover. */
   hover() {
     this.bell(880 + Math.random() * 60, 0.025, 0.8);
