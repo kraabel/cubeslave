@@ -9,6 +9,7 @@ import { ATTACKS, DIM_LABELS, TOLL, WORKS, type Dim } from "@/lib/corpus";
 import { offlineNarration, type Narration } from "@/lib/narrate";
 import { QUESTIONS } from "@/lib/questions";
 import type { Stage } from "./Scene";
+import SoundDeck from "./SoundDeck";
 import Typewriter from "./Typewriter";
 
 const Scene = dynamic(() => import("./Scene"), { ssr: false });
@@ -45,7 +46,6 @@ export default function Experience() {
   const [result, setResult] = useState<Result | null>(null);
   const [narration, setNarration] = useState<Narration | null>(null);
   const [count, setCount] = useState(0);
-  const [muted, setMuted] = useState(false);
   const [memorial, setMemorial] = useState(false);
   const [readingDone, setReadingDone] = useState(false);
 
@@ -152,13 +152,6 @@ export default function Experience() {
     };
   }, [stage, result, narration]);
 
-  const toggleMute = () => {
-    const m = !muted;
-    setMuted(m);
-    audio.setMuted(m);
-    if (m) hush();
-  };
-
   const restart = () => {
     hush();
     audio.select();
@@ -181,11 +174,7 @@ export default function Experience() {
     <main className="stage" data-stage={stage}>
       <Scene stage={stage} progress={progress} risk={result?.risk ?? null} />
 
-      {stage !== "gate" && (
-        <button className="chrome sound" onClick={toggleMute} aria-label={muted ? "Unmute" : "Mute"}>
-          {muted ? "Sound off" : "Sound on"}
-        </button>
-      )}
+      <SoundDeck />
 
       {stage === "question" && (
         <div className="constellation" aria-hidden>

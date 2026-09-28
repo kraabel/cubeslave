@@ -18,7 +18,10 @@ type Nodes = {
 
 class CabinAudio {
   private n: Nodes | null = null;
-  private muted = false;
+  // Two independent channels, each 0..1. Atmosphere is every synthesized
+  // sound (it drives the master bus); voice is the spoken narration.
+  private atmos = 0.8;
+  private voice = 0.8;
 
   get started() {
     return this.n !== null;
@@ -34,7 +37,7 @@ class CabinAudio {
 
     const master = ctx.createGain();
     master.gain.value = 0;
-    master.gain.linearRampToValueAtTime(0.9, ctx.currentTime + 4);
+    master.gain.linearRampToValueAtTime(busGain(this.atmos), ctx.currentTime + 4);
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 256;
     master.connect(analyser);
@@ -113,16 +116,26 @@ class CabinAudio {
     this.n = { ctx, master, verb, droneFilter, tensionOsc, tensionGain, windGain, analyser, level: new Uint8Array(analyser.frequencyBinCount) };
   }
 
-  setMuted(m: boolean) {
-    this.muted = m;
+  setAtmosphere(v: number) {
+    this.atmos = clamp01(v);
     if (!this.n) return;
     const { ctx, master } = this.n;
     master.gain.cancelScheduledValues(ctx.currentTime);
-    master.gain.linearRampToValueAtTime(m ? 0 : 0.9, ctx.currentTime + 0.6);
+    master.gain.setValueAtTime(master.gain.value, ctx.currentTime);
+    master.gain.linearRampToValueAtTime(busGain(this.atmos), ctx.currentTime + 0.25);
   }
 
-  isMuted() {
-    return this.muted;
+  setVoice(v: number) {
+    this.voice = clamp01(v);
+    if (this.voice === 0) hush();
+  }
+
+  atmosphere() {
+    return this.atmos;
+  }
+
+  voiceLevel() {
+    return this.voice;
   }
 
   /** 0 = calm, 1 = full dread. */
@@ -137,7 +150,7 @@ class CabinAudio {
 
   /** A typewriter key strike. */
   tick() {
-    if (!this.n || this.muted) return;
+    if (!this.n || this.atmos === 0) return;
     const { ctx, master } = this.n;
     const t = ctx.currentTime;
     const src = ctx.createBufferSource();
@@ -166,7 +179,7 @@ class CabinAudio {
 
   /** The verdict: sub drop, dull thud, long tail. */
   reveal(intensity: number) {
-    if (!this.n || this.muted) return;
+    if (!this.n || this.atmos === 0) return;
     const { ctx, master, verb } = this.n;
     const t = ctx.currentTime;
     const o = ctx.createOscillator();
@@ -209,7 +222,7 @@ class CabinAudio {
   }
 
   private bell(freq: number, gain: number, decay: number) {
-    if (!this.n || this.muted) return;
+    if (!this.n || this.atmos === 0) return;
     const { ctx, master, verb } = this.n;
     const t = ctx.currentTime;
     const g = ctx.createGain();
@@ -233,6 +246,11 @@ class CabinAudio {
     }
   }
 }
+
+const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+
+/** Sliders feel linear to the ear when the gain follows a square curve. */
+const busGain = (v: number) => 0.9 * v * v;
 
 function noise(ctx: AudioContext, seconds: number): AudioBuffer {
   const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * seconds), ctx.sampleRate);
@@ -260,12 +278,13 @@ export const audio = new CabinAudio();
 
 /** The oracle's spoken voice, via the browser's built-in speech synthesis. */
 export function speak(text: string) {
-  if (typeof window === "undefined" || !("speechSynthesis" in window) || audio.isMuted()) return;
+  const level = audio.voiceLevel();
+  if (typeof window === "undefined" || !("speechSynthesis" in window) || level === 0) return;
   window.speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
   u.rate = 0.82;
   u.pitch = 0.55;
-  u.volume = 0.9;
+  u.volume = level;
   const voices = window.speechSynthesis.getVoices();
   const pick =
     voices.find((v) => /Daniel|Google UK English Male|Alex|Fred/i.test(v.name)) ?? voices.find((v) => v.lang.startsWith("en"));
